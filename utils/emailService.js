@@ -3,9 +3,11 @@ const nodemailer = require('nodemailer');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// Configuramos el "cartero" (Transporter)
+// 🔥 CORRECCIÓN 1: Configuramos el "cartero" de forma explícita y blindada para la nube
 const transporter = nodemailer.createTransport({
-  service: 'gmail', // Puedes cambiarlo luego a 'SendGrid', 'AWS SES', etc.
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: process.env.EMAIL_PORT || 465,
+  secure: true, // true obliga a usar la conexión encriptada directa (SSL)
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -24,9 +26,9 @@ const sendEmail = async (to, subject, text) => {
       text: text,
     };
     await transporter.sendMail(mailOptions);
-    console.log(`Correo básico enviado exitosamente a: ${to}`);
+    console.log(`✅ Correo básico enviado exitosamente a: ${to}`);
   } catch (error) {
-    console.error('Error enviando correo básico:', error);
+    console.error('❌ Error enviando correo básico:', error);
   }
 };
 
@@ -48,6 +50,9 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
     if (type === 'message' && !user.emailNewMessages) return; 
     if (type === 'promotion' && !user.emailPromotions) return; 
 
+    // 🔥 CORRECCIÓN 2: Usar la variable de entorno en lugar de localhost
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
     // 3. Armamos un diseño HTML elegante (Plantilla Oscura)
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #050505; color: #ffffff; border-radius: 15px; overflow: hidden; border: 1px solid #333;">
@@ -58,7 +63,7 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
           <h2 style="color: #fff; margin-top: 0;">¡Tienes novedades!</h2>
           <p style="font-size: 16px; color: #ccc; line-height: 1.5;">${text}</p>
           <div style="text-align: center; margin-top: 30px;">
-            <a href="http://localhost:3000/dashboard/notifications" style="background-color: #2563eb; color: white; padding: 12px 25px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">Ir a mi cuenta</a>
+            <a href="${frontendUrl}/dashboard/notifications" style="background-color: #2563eb; color: white; padding: 12px 25px; text-decoration: none; border-radius: 25px; font-weight: bold; display: inline-block;">Ir a mi cuenta</a>
           </div>
         </div>
         <div style="padding: 15px; text-align: center; font-size: 12px; color: #666; background-color: #0a0a0a;">
