@@ -1,0 +1,617 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------
+// ENUMS (Listas de valores permitidos)
+// ------------------------------------------------------
+enum Role {
+  FAN
+  CREATOR
+  ADMIN // 👑 El rol Dios (Tú)
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  SHADOWBANNED
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+  PAST_DUE
+  EXPIRED 
+}
+
+enum TransactionType {
+  SUBSCRIPTION
+  TIP
+  PPV_POST
+  PPV_MESSAGE
+  BUNDLE
+  LIVE_TICKET 
+  PAYOUT 
+  PROMOTION // 🔥 NUEVO: Registro contable cuando compran un Boost
+}
+
+enum TransactionStatus {
+  PENDING
+  WAITING_CRYPTO 
+  COMPLETED
+  REFUNDED
+  FAILED
+}
+
+enum WithdrawalStatus {
+  PENDING
+  PROCESSING 
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum PostVisibility {
+  PUBLIC
+  SUBSCRIBERS_ONLY
+}
+
+enum MediaType {
+  TEXT
+  IMAGE
+  VIDEO
+}
+
+enum StreamStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+}
+
+enum KycStatus {
+  NONE 
+  PENDING 
+  APPROVED 
+  REJECTED 
+}
+
+// 🔥 NUEVO: PAQUETES DE IMPULSO
+enum PromoPackage {
+  BASIC
+  PRO
+  GOD
+}
+
+// ------------------------------------------------------
+// MODELOS PRINCIPALES
+// ------------------------------------------------------
+
+model User {
+  id             String     @id @default(uuid())
+  email          String     @unique
+  username       String?    @unique
+  passwordHash   String
+  name           String?
+  role           Role       @default(FAN)
+  status         UserStatus @default(ACTIVE)
+
+  emailNotifications Boolean @default(true)
+  pushNotifications  Boolean @default(true)
+  isPrivateProfile   Boolean @default(false)
+
+  isEmailVerified  Boolean @default(false)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+  
+  // 🔥 NUEVOS CAMPOS PARA LA PUERTA DE HIERRO:
+  emailVerificationToken   String?   @unique
+  emailVerificationExpires DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  language String @default("es")
+  currency String @default("USD")
+
+  referralCode String  @unique @default(uuid())
+  referredById String?
+
+  sessions       Session[]
+  creatorProfile CreatorProfile?
+  posts          Post[]
+  comments       Comment[]
+  likes          Like[]
+  commentLikes   CommentLike[]   @relation("UserCommentLikes")
+  wallet         Wallet?
+
+  subscriptions        Subscription[]    @relation("FanSubscriptions")
+  subscribers          Subscription[]    @relation("CreatorSubscribers")
+  sentTransactions     Transaction[]     @relation("SentTransactions")
+  receivedTransactions Transaction[]     @relation("ReceivedTransactions")
+  withdrawals          Withdrawal[]      @relation("CreatorWithdrawals")
+  postPurchases        PostPurchase[]    @relation("FanPostPurchases")
+  messagePurchases     MessagePurchase[] @relation("FanMessagePurchases")
+  bundles              Bundle[]          @relation("CreatorBundles")
+  bundlePurchases      BundlePurchase[]  @relation("FanBundlePurchases")
+  discounts            Discount[]        @relation("CreatorDiscounts")
+
+  coupons Coupon[] @relation("CreatorCoupons")
+
+  sentMessages     Message[]      @relation("SentMessages")
+  receivedMessages Message[]      @relation("ReceivedMessages")
+  creatorChats     Conversation[] @relation("CreatorConversations")
+  fanChats         Conversation[] @relation("FanConversations")
+
+  reportsMade     Report[] @relation("Reporter")
+  reportsReceived Report[] @relation("ReportedUser")
+
+  stories    Story[]     @relation("CreatorStories")
+  storyViews StoryView[] @relation("FanStoryViews")
+
+  liveStreams      LiveStream[]      @relation("CreatorLiveStreams")
+  liveChatMessages LiveChatMessage[] @relation("UserLiveChatMessages")
+
+  blocks       Block[]        @relation("BlockingUsers")
+  blockedBy    Block[]        @relation("BlockedUsers")
+  notifications Notification[] @relation("UserNotifications")
+
+  followers Follow[]   @relation("Following")
+  following Follow[]   @relation("Followers")
+  bookmarks Bookmark[]
+
+  // 🔥 NUEVO: Promociones compradas por el creador
+  promotions Promotion[] @relation("CreatorPromotions")
+
+  referredBy User?  @relation("ReferralNetwork", fields: [referredById], references: [id])
+  referrals  User[]  @relation("ReferralNetwork")
+  adminNotes String? 
+
+  fcmToken String?
+
+  emailPromotions  Boolean @default(true)
+  emailNewMessages Boolean @default(true)
+  emailSales       Boolean @default(true)
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  refreshToken String   @unique
+  deviceInfo   String?
+  ipAddress    String?
+  isValid      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CreatorProfile {
+  id           String  @id @default(uuid())
+  userId       String  @unique
+  bio          String?
+  coverImage   String?
+  profileImage String?
+  category     String?
+  isVerified   Boolean @default(false) 
+
+  kycStatus          KycStatus @default(NONE)
+  idDocumentUrl      String? 
+  idSelfieUrl        String? 
+  kycRejectionReason String? 
+
+  monthlyPrice     Float   @default(0.0)
+  welcomeMessage  String?   @db.Text  // 👈 Asegúrate de tener este campo
+  minPpvPrice      Float   @default(0.0)
+  blockedCountries String?
+  hideBalance      Boolean @default(false)
+  hideStats        Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  instagram    String?
+  twitter      String?
+  website      String?
+}
+
+// 🔥 NUEVO: TABLA PARA CONTROLAR LA FAMA (Fansmios Boost)
+model Promotion {
+  id        String       @id @default(uuid())
+  creatorId String
+  package   PromoPackage
+  active    Boolean      @default(true)
+  expiresAt DateTime     // Cuándo se acaba su tiempo de fama
+  createdAt DateTime     @default(now())
+
+  creator   User         @relation("CreatorPromotions", fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+model Post {
+  id      String  @id @default(uuid())
+  content String?
+
+  mediaUrl  String?
+  mediaType MediaType @default(TEXT)
+
+  visibility PostVisibility @default(SUBSCRIBERS_ONLY)
+  isPPV      Boolean        @default(false)
+  price      Float?         @default(0.0)
+
+  userId String
+
+  scheduledAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments  Comment[]
+  likes     Like[]
+  purchases PostPurchase[]
+  bundles   Bundle[]       @relation("BundlePosts")
+  bookmarks Bookmark[]
+  reports   Report[]
+}
+
+model Comment {
+  id       String  @id @default(uuid())
+  content  String
+  userId   String
+  postId   String
+  parentId String?
+
+  parent  Comment?      @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[]     @relation("CommentReplies")
+  likes   CommentLike[]
+
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model CommentLike {
+  id        String   @id @default(uuid())
+  userId    String
+  commentId String
+  emoji     String   @default("❤️")
+  createdAt DateTime @default(now())
+
+  user    User    @relation("UserCommentLikes", fields: [userId], references: [id], onDelete: Cascade)
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, commentId])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  userId    String
+  postId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+}
+
+model Wallet {
+  id             String @id @default(uuid())
+  userId         String @unique
+  balance        Float  @default(0.0) 
+  pendingBalance Float  @default(0.0) 
+
+  cryptoAddress String? 
+  cryptoNetwork String? 
+
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Subscription {
+  id        String             @id @default(uuid())
+  fanId     String
+  creatorId String
+  status    SubscriptionStatus @default(ACTIVE)
+  price     Float
+  startDate DateTime           @default(now())
+  endDate   DateTime 
+
+  reminderSent Boolean @default(false) 
+
+  fan      User @relation("FanSubscriptions", fields: [fanId], references: [id], onDelete: Cascade)
+  creator  User @relation("CreatorSubscribers", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([fanId, creatorId])
+}
+
+model Transaction {
+  id         String            @id @default(uuid())
+  senderId   String
+  receiverId String
+  type       TransactionType
+  status     TransactionStatus @default(PENDING)
+
+  amount      Float 
+  platformFee Float 
+  netAmount   Float 
+
+  postId          String?
+  attachedMessage String?
+  bundleId        String?
+
+  nowPaymentsId String? @unique 
+  payAddress    String? 
+  cryptoTxHash  String? 
+
+  fundsReleased Boolean @default(false) 
+
+  createdAt DateTime @default(now())
+  sender    User     @relation("SentTransactions", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver  User     @relation("ReceivedTransactions", fields: [receiverId], references: [id], onDelete: Cascade)
+}
+
+model Withdrawal {
+  id        String           @id @default(uuid())
+  creatorId String
+  amount    Float
+  status    WithdrawalStatus @default(PENDING)
+
+  cryptoAddress String? 
+  cryptoNetwork String? 
+  txHash        String? 
+
+  adminNotes String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  creator    User     @relation("CreatorWithdrawals", fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+model PlatformSetting {
+  id                 String   @id @default("global_settings")
+  platformFeePercent Float    @default(20.0)
+  updatedAt          DateTime @updatedAt
+}
+
+model Report {
+  id         String @id @default(uuid())
+  reporterId String
+  reporter   User   @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  reportedUserId String?
+  reportedUser   User?   @relation("ReportedUser", fields: [reportedUserId], references: [id], onDelete: Cascade)
+
+  postId String?
+  post   Post?   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  messageId String?
+  message   Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  type        String  @default("USER")
+  reason      String
+  description String?
+
+  status     String  @default("PENDING")
+  adminNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PostPurchase {
+  id        String   @id @default(uuid())
+  fanId     String
+  postId    String
+  pricePaid Float
+  createdAt DateTime @default(now())
+  fan       User     @relation("FanPostPurchases", fields: [fanId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([fanId, postId])
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  creatorId String
+  fanId     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  creator  User      @relation("CreatorConversations", fields: [creatorId], references: [id], onDelete: Cascade)
+  fan      User      @relation("FanConversations", fields: [fanId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([creatorId, fanId])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderId       String
+  receiverId     String
+  content        String?
+  mediaUrl       String?
+  isPPV          Boolean  @default(false)
+  price          Float?   @default(0.0)
+  isUnlocked     Boolean  @default(false)
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User              @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver     User              @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  purchases    MessagePurchase[]
+  reports      Report[]
+}
+
+model MessagePurchase {
+  id        String   @id @default(uuid())
+  fanId     String
+  messageId String
+  pricePaid Float
+  createdAt DateTime @default(now())
+  fan       User     @relation("FanMessagePurchases", fields: [fanId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([fanId, messageId])
+}
+
+model Bundle {
+  id          String   @id @default(uuid())
+  creatorId   String
+  title       String
+  description String?
+  price       Float
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  creator   User             @relation("CreatorBundles", fields: [creatorId], references: [id], onDelete: Cascade)
+  posts     Post[]           @relation("BundlePosts")
+  purchases BundlePurchase[]
+}
+
+model BundlePurchase {
+  id        String   @id @default(uuid())
+  fanId     String
+  bundleId  String
+  pricePaid Float
+  createdAt DateTime @default(now())
+  fan       User     @relation("FanBundlePurchases", fields: [fanId], references: [id], onDelete: Cascade)
+  bundle    Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+
+  @@unique([fanId, bundleId])
+}
+
+model Discount {
+  id              String   @id @default(uuid())
+  creatorId       String
+  code            String?
+  discountPercent Float
+  expiresAt       DateTime
+  maxUses         Int?
+  usedCount       Int      @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  creator         User     @relation("CreatorDiscounts", fields: [creatorId], references: [id], onDelete: Cascade)
+}
+
+model Story {
+  id        String      @id @default(uuid())
+  mediaUrl  String
+  mediaType MediaType   @default(IMAGE)
+  creatorId String
+  createdAt DateTime    @default(now())
+  expiresAt DateTime
+  creator   User        @relation("CreatorStories", fields: [creatorId], references: [id], onDelete: Cascade)
+  views     StoryView[]
+  caption   String?
+}
+
+model StoryView {
+  id       String   @id @default(uuid())
+  storyId  String
+  viewerId String
+  viewedAt DateTime @default(now())
+  story    Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewer   User     @relation("FanStoryViews", fields: [viewerId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, viewerId])
+}
+
+model LiveStream {
+  id         String       @id @default(uuid())
+  creatorId  String
+  title      String
+  status     StreamStatus @default(SCHEDULED)
+  streamKey  String       @unique
+
+  playbackId String?
+
+  isPPV Boolean @default(false)
+  price Float?  @default(0.0) 
+
+  startedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime          @default(now())
+  creator   User              @relation("CreatorLiveStreams", fields: [creatorId], references: [id], onDelete: Cascade)
+  messages  LiveChatMessage[]
+}
+
+model LiveChatMessage {
+  id         String     @id @default(uuid())
+  streamId   String
+  userId     String
+  content    String
+  isDonation Boolean    @default(false)
+  amount     Float?     @default(0.0)
+  createdAt  DateTime   @default(now())
+  stream     LiveStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  user       User       @relation("UserLiveChatMessages", fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+  blocker   User     @relation("BlockingUsers", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("BlockedUsers", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String
+  content   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  link      String?
+}
+
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("Followers", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+}
+
+model Bookmark {
+  id        String   @id @default(uuid())
+  userId    String
+  postId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+}
+
+model Coupon {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  discountPercent Float
+  creatorId       String
+  creator         User      @relation("CreatorCoupons", fields: [creatorId], references: [id])
+  active          Boolean   @default(true)
+  expiresAt       DateTime?
+  maxUses         Int?
+  currentUses     Int       @default(0)
+  createdAt       DateTime  @default(now())
+}
