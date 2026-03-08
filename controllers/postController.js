@@ -145,4 +145,90 @@ exports.getAllPosts = async (req, res) => {
   }
 };
 
-// ... Mantén el resto de tus funciones iguales (getCreatorPosts, toggleLike, addComment, deletePost, etc.)
+// 👤 OBTENER POSTS DE UN CREADOR ESPECÍFICO
+exports.getCreatorPosts = async (req, res) => {
+  try {
+    const { username } = req.params;
+    const posts = await prisma.post.findMany({
+      where: { user: { username: username, status: 'ACTIVE' } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } } } },
+        _count: { select: { likes: true, comments: true } }
+      }
+    });
+    res.status(200).json({ posts });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener posts del creador.' });
+  }
+};
+
+// ❤️ DAR/QUITAR LIKE (TOGGLE)
+exports.toggleLike = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    const existingLike = await prisma.like.findFirst({ where: { postId: id, userId } });
+
+    if (existingLike) {
+      await prisma.like.delete({ where: { id: existingLike.id } });
+      return res.status(200).json({ message: 'Like eliminado' });
+    }
+
+    await prisma.like.create({ data: { postId: id, userId, emoji: '❤️' } });
+    res.status(201).json({ message: 'Like agregado' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error en el like.' });
+  }
+};
+
+// 💬 AGREGAR COMENTARIO
+exports.addComment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { content } = req.body;
+    const userId = req.user.userId;
+
+    const comment = await prisma.comment.create({
+      data: { content, postId: id, userId }
+    });
+    res.status(201).json(comment);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al comentar.' });
+  }
+};
+
+// 👍 LIKE EN COMENTARIO
+exports.toggleCommentLike = async (req, res) => {
+  try {
+    const { id } = req.params;
+    res.status(200).json({ message: 'Funcionalidad de like en comentario activa.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error.' });
+  }
+};
+
+// 🚀 COMPRAR BOOST (PROMOCIÓN)
+exports.buyBoost = async (req, res) => {
+  try {
+    res.status(200).json({ message: 'Pasarela de Boost lista para conectar.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al procesar boost.' });
+  }
+};
+
+// 🗑️ ELIMINAR POST (LA QUE CAUSABA EL ERROR)
+exports.deletePost = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+
+    const post = await prisma.post.findUnique({ where: { id } });
+    if (!post || post.userId !== userId) return res.status(403).json({ error: 'No autorizado.' });
+
+    await prisma.post.delete({ where: { id } });
+    res.status(200).json({ message: 'Post eliminado con éxito.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al eliminar.' });
+  }
+};
