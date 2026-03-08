@@ -21,6 +21,10 @@ Sentry.init({
 });
 
 const app = express();
+
+// 🔥 CRÍTICO: Confiar en el proxy de Coolify para que el Escudo Anti-Bots no bloquee usuarios reales
+app.set('trust proxy', 1);
+
 const server = http.createServer(app); 
 const PORT = process.env.PORT || 5000;
 
