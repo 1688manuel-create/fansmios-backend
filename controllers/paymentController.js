@@ -9,8 +9,13 @@ const { sendPushNotification } = require('../utils/pushService');
 // ==========================================
 exports.createPaymentIntent = async (req, res) => {
   try {
-    const { amount, type, description, couponCode, creatorId, postId, bundleId, messageId, attachedMessage } = req.body; 
+    let { amount, type, description, couponCode, creatorId, postId, bundleId, messageId, attachedMessage } = req.body; 
     const fanId = req.user.userId;
+
+    // 🛡️ TRADUCTOR DE ETIQUETAS (Evita el error de Prisma)
+    // Si el frontend envía "POST", lo corregimos a "PPV_POST" para que coincida con la DB
+    if (type === 'POST') type = 'PPV_POST';
+    if (type === 'MESSAGE') type = 'PPV_MESSAGE';
     
     if (!amount || amount <= 0) return res.status(400).json({ error: 'Monto inválido.' });
 
@@ -48,7 +53,7 @@ exports.createPaymentIntent = async (req, res) => {
         data: {
           senderId: fanId,
           receiverId: creatorId,
-          type,
+          type: type, // Ahora es un tipo válido (ej: PPV_POST)
           status: 'COMPLETED',
           amount: finalAmount,
           platformFee,
@@ -78,8 +83,15 @@ exports.createPaymentIntent = async (req, res) => {
         });
       } else if (type === 'PPV_POST') {
         await db.postPurchase.create({ data: { fanId, postId, pricePaid: finalAmount } });
+      } else if (type === 'PPV_MESSAGE') {
+        await db.messagePurchase.create({ data: { fanId, messageId: attachedMessage, pricePaid: finalAmount } });
+        await db.message.update({ where: { id: attachedMessage }, data: { isUnlocked: true } });
+      } else if (type === 'BUNDLE') {
+        const bundle = await db.bundle.findUnique({ where: { id: bundleId }, include: { posts: true } });
+        await db.bundlePurchase.create({ data: { fanId, bundleId, pricePaid: finalAmount } });
+        const postPurchasesData = bundle.posts.map(p => ({ fanId, postId: p.id, pricePaid: 0 }));
+        await db.postPurchase.createMany({ data: postPurchasesData, skipDuplicates: true });
       }
-      // (Añade aquí el resto de tus activaciones: Bundle, Tips, etc.)
     });
 
     res.status(200).json({ success: true, message: 'Procesado por PayRam', receipt: payramReceiptId });
