@@ -327,6 +327,7 @@ model Transaction {
   createdAt       DateTime @default(now())
   sender          User     @relation("SentTransactions", fields: [senderId], references: [id], onDelete: Cascade)
   receiver        User     @relation("ReceivedTransactions", fields: [receiverId], references: [id], onDelete: Cascade)
+  fundsReleased Boolean @default(false)
 }
 
 model Withdrawal {
