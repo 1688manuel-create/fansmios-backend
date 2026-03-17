@@ -5,23 +5,32 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
-const { containsForbiddenWords } = require('../utils/contentFilter');
 const { cloudinary } = require('../utils/cloudinaryConfig');
+
+// 🛡️ Importación Segura del Filtro de Palabras
+let containsForbiddenWords = () => false;
+try {
+  const filter = require('../utils/contentFilter');
+  if (filter && typeof filter.containsForbiddenWords === 'function') {
+    containsForbiddenWords = filter.containsForbiddenWords;
+  }
+} catch (e) {
+  console.log("⚠️ Archivo de filtro de palabras no encontrado, saltando validación...");
+}
 
 // Función auxiliar para enviar al Radar de IA (Sightengine)
 const checkAI = async (filePath) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
-    console.warn("⚠️ API de Sightengine no configurada. Saltando revisión Anti-IA.");
     return { isAI: false, score: 0 };
   }
 
-  const data = new FormData();
-  data.append('media', fs.createReadStream(filePath));
-  data.append('models', 'genai');
-  data.append('api_user', process.env.SIGHTENGINE_USER);
-  data.append('api_secret', process.env.SIGHTENGINE_SECRET);
-
   try {
+    const data = new FormData();
+    data.append('media', fs.createReadStream(filePath));
+    data.append('models', 'genai');
+    data.append('api_user', process.env.SIGHTENGINE_USER);
+    data.append('api_secret', process.env.SIGHTENGINE_SECRET);
+
     const response = await axios({
       method: 'post',
       url: 'https://api.sightengine.com/1.0/check.json',
@@ -34,8 +43,7 @@ const checkAI = async (filePath) => {
     }
     return { isAI: false, score: response.data?.type?.ai_generated || 0 };
   } catch (error) {
-    console.error("❌ Error en Sightengine:", error.message);
-    return { isAI: false, score: 0 }; // Si falla la API, asumimos inocencia para no bloquear a lo tonto
+    return { isAI: false, score: 0 }; 
   }
 };
 
@@ -44,26 +52,29 @@ exports.createPost = async (req, res) => {
     const { content, isPPV, price } = req.body;
     const userId = req.user.userId;
     
-    // ☁️ ¡MAGIA!: req.file.path ahora es directamente el LINK Inmortal de Cloudinary
+    // ☁️ Obtenemos el link inmortal de Cloudinary de forma segura
     const mediaUrl = req.file ? req.file.path : null; 
     const mediaType = req.file ? (req.file.mimetype.startsWith('video/') ? 'VIDEO' : 'IMAGE') : 'TEXT';
 
-    if (!content && !mediaUrl) return res.status(400).json({ error: 'El post debe tener texto o imagen.' });
+    if (!content && !mediaUrl) {
+      return res.status(400).json({ error: 'El post debe tener texto o imagen.' });
+    }
 
-    // 🛡️ 1. FILTRO DE TEXTO
-    if (containsForbiddenWords(content)) {
-      // Si ofende, borramos la foto de Cloudinary usando su ID público (filename)
-      if (req.file) await cloudinary.uploader.destroy(req.file.filename); 
+    // 🛡️ 1. FILTRO DE TEXTO (Blindado)
+    if (content && containsForbiddenWords(content)) {
+      if (req.file && req.file.filename) {
+        await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("No se pudo borrar de nube"));
+      }
       return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
     }
 
-    // 🤖 2. RADAR ANTI-IA (Leyendo el link de la nube)
+    // 🤖 2. RADAR ANTI-IA (Leyendo el link de la nube de forma segura)
     if (req.file && req.file.mimetype.startsWith('image/')) {
       if (process.env.SIGHTENGINE_USER && process.env.SIGHTENGINE_SECRET) {
         try {
           const response = await axios.get('https://api.sightengine.com/1.0/check.json', {
             params: {
-              url: mediaUrl, // Le pasamos el link de Cloudinary directo
+              url: mediaUrl,
               models: 'genai',
               api_user: process.env.SIGHTENGINE_USER,
               api_secret: process.env.SIGHTENGINE_SECRET
@@ -72,12 +83,13 @@ exports.createPost = async (req, res) => {
 
           if (response.data?.type?.ai_generated > 0.8) {
             const probability = (response.data.type.ai_generated * 100).toFixed(2);
-            // 🚨 ¡Es IA! Borramos la foto de Cloudinary para no pagar almacenamiento basura
-            await cloudinary.uploader.destroy(req.file.filename);
+            if (req.file && req.file.filename) {
+              await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("No se pudo borrar de nube"));
+            }
             return res.status(403).json({ error: `Imagen IA Detectada (${probability}%). Fansmios solo permite contenido real. 🤖🚫` });
           }
         } catch (apiError) {
-          console.error("⚠️ Error conectando con Sightengine por URL. Dejando pasar.");
+          console.error("⚠️ Error conectando con Sightengine por URL. Dejando pasar el post.");
         }
       }
     }
@@ -86,7 +98,7 @@ exports.createPost = async (req, res) => {
     const newPost = await prisma.post.create({
       data: { 
         content: content || null, 
-        mediaUrl, // Guardamos el link de Cloudinary
+        mediaUrl, 
         mediaType, 
         isPPV: isPPV === 'true' || isPPV === true, 
         price: price ? parseFloat(price) : 0, 
@@ -97,23 +109,20 @@ exports.createPost = async (req, res) => {
 
     res.status(201).json({ message: 'Post publicado con éxito', post: newPost });
   } catch (error) { 
-    console.error("Error creando post:", error);
-    // Si algo explota en la BD, borramos la foto huérfana de Cloudinary
-    if (req.file) await cloudinary.uploader.destroy(req.file.filename);
-    res.status(500).json({ error: 'Error al guardar.' }); 
+    console.error("🚨 Error crítico al crear post:", error);
+    // Si la BD falla, limpiamos Cloudinary para no dejar basura
+    if (req.file && req.file.filename) {
+      await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("Error limpiando Cloudinary post-fallo"));
+    }
+    res.status(500).json({ error: 'Error interno del servidor al publicar.' }); 
   }
 };
 
 // 🐕 EL PERRO GUARDIÁN: Escáner Retroactivo de IA
-// Esta función será llamada por una ruta secreta de Admin o por un Cron Job
 exports.scanExistingPostsForAI = async (req, res) => {
   try {
-    // 1. Buscamos los últimos 50 posts que tengan imagen (para no saturar la API)
     const postsToScan = await prisma.post.findMany({
-      where: { 
-        mediaUrl: { not: null },
-        mediaType: 'IMAGE'
-      },
+      where: { mediaUrl: { not: null }, mediaType: 'IMAGE' },
       take: 50,
       orderBy: { createdAt: 'desc' },
       include: { user: { select: { username: true } } }
@@ -122,44 +131,30 @@ exports.scanExistingPostsForAI = async (req, res) => {
     let scannedCount = 0;
     let deletedCount = 0;
 
-    console.log(`🐕 Iniciando Patrullaje Anti-IA en ${postsToScan.length} publicaciones...`);
-
     for (const post of postsToScan) {
-      if (!post.mediaUrl) continue;
+      if (!post.mediaUrl || post.mediaUrl.includes('cloudinary.com')) continue; // Solo escaneamos locales viejas
 
-      // Reconstruimos la ruta real del archivo en el servidor
       const fileName = post.mediaUrl.replace('/uploads/', '');
       const filePath = path.join(__dirname, '..', 'uploads', fileName);
 
-      // Si el archivo existe físicamente
       if (fs.existsSync(filePath)) {
         scannedCount++;
         const aiResult = await checkAI(filePath);
 
         if (aiResult.isAI) {
-          console.log(`🚨 [CAZADO] Eliminando post de @${post.user.username} por uso de IA (${(aiResult.score*100).toFixed(2)}%). ID: ${post.id}`);
-          
-          // 1. Borramos el archivo físico
           fs.unlinkSync(filePath);
-          
-          // 2. Borramos el registro de la base de datos
           await prisma.post.delete({ where: { id: post.id } });
           deletedCount++;
         }
-        
-        // Pausa de 1 segundo entre análisis para no que el API de Sightengine nos bloquee
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
-    res.status(200).json({ 
-      message: 'Patrullaje Anti-IA finalizado.', 
-      stats: { scanned: scannedCount, deletedBots: deletedCount } 
-    });
-
+    if (res && res.status) {
+      res.status(200).json({ message: 'Patrullaje Anti-IA finalizado.', stats: { scanned: scannedCount, deletedBots: deletedCount } });
+    }
   } catch (error) {
-    console.error("Error en el escáner retroactivo:", error);
-    res.status(500).json({ error: 'Error al ejecutar el patrullaje.' });
+    if (res && res.status) res.status(500).json({ error: 'Error al ejecutar el patrullaje.' });
   }
 };
 
@@ -192,7 +187,6 @@ exports.getAllPosts = async (req, res) => {
       }
     });
 
-    // ... (El resto de la lógica de getAllPosts que ya tenías)
     let promotedPosts = [];
     let organicPosts = [];
     const seenPromotedCreators = new Set();
@@ -246,7 +240,7 @@ exports.getAllPosts = async (req, res) => {
 exports.getCreatorPosts = async (req, res) => {
   try {
     const { username } = req.params;
-    const userId = req.user?.userId; // Agregado para verificación
+    const userId = req.user?.userId; 
     
     const posts = await prisma.post.findMany({
       where: { user: { username: username, status: 'ACTIVE' } },
@@ -257,10 +251,9 @@ exports.getCreatorPosts = async (req, res) => {
       }
     });
     
-    // Blindaje extra para que el frontend reciba si el usuario actual tiene acceso
     const formattedPosts = posts.map(post => ({
         ...post,
-        hasAccess: post.userId === userId // Si eres el creador, lo tienes
+        hasAccess: post.userId === userId 
     }));
 
     res.status(200).json({ posts: formattedPosts });
@@ -320,8 +313,13 @@ exports.deletePost = async (req, res) => {
     const post = await prisma.post.findUnique({ where: { id } });
     if (!post || post.userId !== userId) return res.status(403).json({ error: 'No autorizado.' });
 
-    // Si tiene archivo físico, lo borramos también para liberar espacio
-    if (post.mediaUrl) {
+    // 🗑️ Borrado inteligente (Nube o Local)
+    if (post.mediaUrl && post.mediaUrl.includes('cloudinary.com')) {
+      const parts = post.mediaUrl.split('/');
+      const filenameWithExt = parts[parts.length - 1];
+      const publicId = 'fansmios_uploads/' + filenameWithExt.split('.')[0]; 
+      await cloudinary.uploader.destroy(publicId).catch(() => console.log("No se pudo borrar de Cloudinary"));
+    } else if (post.mediaUrl) {
       const fileName = post.mediaUrl.replace('/uploads/', '');
       const filePath = path.join(__dirname, '..', 'uploads', fileName);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
