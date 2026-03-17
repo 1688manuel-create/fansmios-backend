@@ -6,7 +6,7 @@ const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
 const { containsForbiddenWords } = require('../utils/contentFilter');
-const cloudinary = require('../config/cloudinary');
+const { cloudinary } = require('../utils/cloudinaryConfig');
 
 // Función auxiliar para enviar al Radar de IA (Sightengine)
 const checkAI = async (filePath) => {
