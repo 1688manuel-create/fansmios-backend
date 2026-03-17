@@ -227,11 +227,22 @@ exports.toggleLike = async (req, res) => {
 exports.addComment = async (req, res) => {
   try {
     const { id } = req.params;
-    const { content } = req.body;
+    // 🔥 FIX: Ahora el backend recibe y lee el parentId (el ID del comentario original)
+    const { content, parentId } = req.body; 
     const userId = req.user.userId;
-    const comment = await prisma.comment.create({ data: { content, postId: id, userId } });
+
+    const comment = await prisma.comment.create({
+      data: { 
+        content, 
+        postId: id, 
+        userId,
+        parentId: parentId || null // 🔥 FIX: Guardamos quién es el papá en la base de datos
+      }
+    });
     res.status(201).json(comment);
-  } catch (error) { res.status(500).json({ error: 'Error al comentar.' }); }
+  } catch (error) { 
+    res.status(500).json({ error: 'Error al comentar.' }); 
+  }
 };
 
 exports.toggleCommentLike = async (req, res) => { res.status(200).json({ message: 'Funcionalidad activa.' }); };
