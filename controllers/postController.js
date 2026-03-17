@@ -6,6 +6,7 @@ const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
 const { containsForbiddenWords } = require('../utils/contentFilter');
+const cloudinary = require('../config/cloudinary');
 
 // Función auxiliar para enviar al Radar de IA (Sightengine)
 const checkAI = async (filePath) => {
@@ -42,41 +43,50 @@ exports.createPost = async (req, res) => {
   try {
     const { content, isPPV, price } = req.body;
     const userId = req.user.userId;
-    const mediaUrl = req.file ? `/uploads/${req.file.filename}` : null;
-    const mediaType = req.file ? 'IMAGE' : 'TEXT';
+    
+    // ☁️ ¡MAGIA!: req.file.path ahora es directamente el LINK Inmortal de Cloudinary
+    const mediaUrl = req.file ? req.file.path : null; 
+    const mediaType = req.file ? (req.file.mimetype.startsWith('video/') ? 'VIDEO' : 'IMAGE') : 'TEXT';
 
     if (!content && !mediaUrl) return res.status(400).json({ error: 'El post debe tener texto o imagen.' });
 
     // 🛡️ 1. FILTRO DE TEXTO
     if (containsForbiddenWords(content)) {
-      if (req.file) fs.unlinkSync(req.file.path); 
+      // Si ofende, borramos la foto de Cloudinary usando su ID público (filename)
+      if (req.file) await cloudinary.uploader.destroy(req.file.filename); 
       return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
     }
 
-    let isAiChecked = false;
-
-    // 🤖 2. RADAR ANTI-IA (Revisión en la puerta)
+    // 🤖 2. RADAR ANTI-IA (Leyendo el link de la nube)
     if (req.file && req.file.mimetype.startsWith('image/')) {
-      const aiResult = await checkAI(req.file.path);
-      
-      if (aiResult.isAI) {
-        const probability = (aiResult.score * 100).toFixed(2);
-        fs.unlinkSync(req.file.path); // Borramos la evidencia falsa
-        
-        // 🚩 Castigo opcional: Anotar un strike en la cuenta del usuario (requeriría un campo 'strikes' en el modelo User)
-        console.log(`[ALERTA] Usuario ${userId} intentó subir IA (${probability}%). Bloqueado.`);
-        
-        return res.status(403).json({ error: `Imagen IA Detectada (${probability}%). Fansmios solo permite contenido real. 🤖🚫` });
+      if (process.env.SIGHTENGINE_USER && process.env.SIGHTENGINE_SECRET) {
+        try {
+          const response = await axios.get('https://api.sightengine.com/1.0/check.json', {
+            params: {
+              url: mediaUrl, // Le pasamos el link de Cloudinary directo
+              models: 'genai',
+              api_user: process.env.SIGHTENGINE_USER,
+              api_secret: process.env.SIGHTENGINE_SECRET
+            }
+          });
+
+          if (response.data?.type?.ai_generated > 0.8) {
+            const probability = (response.data.type.ai_generated * 100).toFixed(2);
+            // 🚨 ¡Es IA! Borramos la foto de Cloudinary para no pagar almacenamiento basura
+            await cloudinary.uploader.destroy(req.file.filename);
+            return res.status(403).json({ error: `Imagen IA Detectada (${probability}%). Fansmios solo permite contenido real. 🤖🚫` });
+          }
+        } catch (apiError) {
+          console.error("⚠️ Error conectando con Sightengine por URL. Dejando pasar.");
+        }
       }
-      isAiChecked = true; // Marcamos como limpio
     }
 
-    // Guardamos en la base de datos.
-    // Nota: Agregamos el campo invisible en un metadata (si tu Prisma lo soporta, o simplemente lo asumimos revisado)
+    // 💾 3. Guardamos en la Base de Datos
     const newPost = await prisma.post.create({
       data: { 
         content: content || null, 
-        mediaUrl, 
+        mediaUrl, // Guardamos el link de Cloudinary
         mediaType, 
         isPPV: isPPV === 'true' || isPPV === true, 
         price: price ? parseFloat(price) : 0, 
@@ -88,6 +98,8 @@ exports.createPost = async (req, res) => {
     res.status(201).json({ message: 'Post publicado con éxito', post: newPost });
   } catch (error) { 
     console.error("Error creando post:", error);
+    // Si algo explota en la BD, borramos la foto huérfana de Cloudinary
+    if (req.file) await cloudinary.uploader.destroy(req.file.filename);
     res.status(500).json({ error: 'Error al guardar.' }); 
   }
 };

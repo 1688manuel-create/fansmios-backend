@@ -15,13 +15,13 @@ cloudinary.config({
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
-    folder: 'fansmios_uploads', // Una carpeta dentro de tu nube para tener todo ordenado
-    allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webp'], // Soportamos fotos y videos
-    resource_type: 'auto' // Detecta automáticamente si es imagen o video
+    folder: 'fansmios_uploads', // Carpeta principal en tu nube
+    allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webp', 'mov', 'webm', 'mp3', 'wav', 'ogg'], // 🚀 Ampliado para multimedia total
+    resource_type: 'auto' // Detecta automáticamente si es imagen, video o audio
   }
 });
 
-// 3. Creamos el "cargador" que usaremos en nuestras rutas
-const upload = multer({ storage: storage });
+// 3. Creamos el "cargador" maestro
+const uploadCloudinary = multer({ storage: storage });
 
-module.exports = { cloudinary, upload };
+module.exports = { cloudinary, uploadCloudinary };

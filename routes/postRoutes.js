@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit'); // 🔥 Importamos la armadura Anti-Spam
 const postController = require('../controllers/postController');
+const { uploadCloudinary } = require('../utils/cloudinaryConfig');
 
 // 🔥 CORRECCIÓN: Traemos ambos guardias de seguridad (Estricto y Flexible)
 const { verifyToken, optionalAuth } = require('../middlewares/authMiddleware');
@@ -58,5 +59,8 @@ router.post('/comment/:id/like', verifyToken, postController.toggleCommentLike);
 
 // 🚀 RUTAS DE MONETIZACIÓN Y BOOST
 router.post('/buy-boost', verifyToken, postController.buyBoost);
+
+// Usamos uploadCloudinary.single('media') en la ruta de crear
+router.post('/', verifyToken, uploadCloudinary.single('media'), postController.createPost);
 
 module.exports = router;
