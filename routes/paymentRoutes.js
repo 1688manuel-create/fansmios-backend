@@ -1,34 +1,31 @@
-// backend/routes/paymentRoutes.js
 const express = require('express');
 const router = express.Router();
 const paymentController = require('../controllers/paymentController');
 const { verifyToken } = require('../middlewares/authMiddleware');
-const webhookController = require('../controllers/webhookController');
 
 // ==========================================
-// 💳 RUTAS FINANCIERAS (Híbridas Cripto-Fiat)
+// 💳 NÚCLEO FINANCIERO PAYRAM (Procesamiento Interno)
 // ==========================================
 
 /**
  * Generador Maestro de Órdenes (Suscripciones, PPV, Tips, Bundles)
- * Esta única ruta gestiona la creación de cualquier tipo de intención de pago.
+ * Esta es la ruta central que dispara el motor de PayRam.
+ * Procesa el pago de forma instantánea sin depender de webhooks externos.
  */
 router.post('/create-intent', verifyToken, paymentController.createPaymentIntent);
 
 // ==========================================
-// 🔁 RUTAS DE CONTROL DE SUSCRIPCIONES
+// 🔁 GESTIÓN DE SUSCRIPCIONES Y ACTIVOS
 // ==========================================
-router.get('/my-subscriptions', verifyToken, paymentController.getMySubscriptions);
-router.post('/cancel-subscription', verifyToken, paymentController.cancelSubscription);
 
-// ==========================================
-// 📡 WEBHOOK GLOBAL (El Cerebro Activador)
-// ==========================================
 /**
- * RUTA PÚBLICA PARA EL WEBHOOK DE NOWPAYMENTS
- * Importante: No lleva verifyToken porque lo llama el servidor de la pasarela.
- * Se usa 'handleNowPaymentsWebhook' que es el nombre exportado en tu controlador.
+ * Obtener el historial de suscripciones activas del Fan.
  */
-router.post('/webhook', webhookController.handleNowPaymentsWebhook);
+router.get('/my-subscriptions', verifyToken, paymentController.getMySubscriptions);
+
+/**
+ * Cancelar la renovación de una suscripción activa.
+ */
+router.post('/cancel-subscription', verifyToken, paymentController.cancelSubscription);
 
 module.exports = router;

@@ -64,7 +64,7 @@ try {
 // ==========================================
 app.use(cors());
 
-// 🔥 CRÍTICO: NOWPayments requiere que TODO se parsee como JSON antes de llegar a las rutas
+// 🔥 CRÍTICO:  requiere que TODO se parsee como JSON antes de llegar a las rutas
 app.use(express.json()); 
 
 // Carpeta pública de archivos (Fotos/Videos)

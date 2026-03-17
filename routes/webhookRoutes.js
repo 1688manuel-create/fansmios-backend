@@ -3,22 +3,20 @@ const express = require('express');
 const router = express.Router();
 
 // Controladores
-const webhookController = require('../controllers/webhookController');
-const muxWebhookController = require('../controllers/muxWebhookController'); // 🔥 IMPORTAMOS EL CEREBRO DE MUX
+const muxWebhookController = require('../controllers/muxWebhookController'); // 🔥 CEREBRO DE STREAMING (Mux)
+
+/**
+ * 📢 NOTA DEL SISTEMA:
+ * Se eliminó el webhook de NOWPayments. 
+ * El motor financiero ahora es PayRam y procesa todo en tiempo real 
+ * desde 'paymentRoutes.js'.
+ */
 
 // ==========================================
-// 💰 WEBHOOKS FINANCIEROS (FASES 2 & 3)
+// 🎥 WEBHOOKS DE VIDEO Y STREAMING (Mux)
 // ==========================================
-// 📡 RUTA: La antena secreta descentralizada (NOWPayments)
-// Nota: NOWPayments usa JSON normal, no necesitamos el express.raw() que exigía Stripe.
-router.post('/nowpayments', express.json(), webhookController.handleNowPaymentsWebhook);
-
-
-// ==========================================
-// 🎥 WEBHOOKS DE VIDEO Y STREAMING (FASE 5)
-// ==========================================
-// 📡 RUTA: La antena de automatización de Mux
-// Mux nos enviará un JSON cada vez que el creador encienda o apague el OBS.
+// 📡 RUTA: La antena de automatización de Mux.
+// Mux nos avisa cuando un Creador inicia o termina un Live Stream.
 router.post('/mux', express.json(), muxWebhookController.handleMuxWebhook);
 
 module.exports = router;
