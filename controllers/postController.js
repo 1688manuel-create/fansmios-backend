@@ -110,7 +110,6 @@ exports.createPost = async (req, res) => {
     res.status(201).json({ message: 'Post publicado con éxito', post: newPost });
   } catch (error) { 
     console.error("🚨 Error crítico al crear post:", error);
-    // Si la BD falla, limpiamos Cloudinary para no dejar basura
     if (req.file && req.file.filename) {
       await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("Error limpiando Cloudinary post-fallo"));
     }
@@ -132,7 +131,7 @@ exports.scanExistingPostsForAI = async (req, res) => {
     let deletedCount = 0;
 
     for (const post of postsToScan) {
-      if (!post.mediaUrl || post.mediaUrl.includes('cloudinary.com')) continue; // Solo escaneamos locales viejas
+      if (!post.mediaUrl || post.mediaUrl.includes('cloudinary.com')) continue; 
 
       const fileName = post.mediaUrl.replace('/uploads/', '');
       const filePath = path.join(__dirname, '..', 'uploads', fileName);
@@ -158,10 +157,6 @@ exports.scanExistingPostsForAI = async (req, res) => {
   }
 };
 
-// ==========================================
-// MANTENEMOS EL RESTO DE TUS FUNCIONES INTACTAS
-// ==========================================
-
 exports.getAllPosts = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -183,7 +178,11 @@ exports.getAllPosts = async (req, res) => {
         _count: { select: { likes: true, comments: true } },
         purchases: { where: { fanId: userId } },
         likes: { where: { userId: userId }, select: { id: true, emoji: true } },
-        comments: { include: { _count: true } } 
+        // 🔥 FIX DE COMENTARIOS: Ahora trae el nombre del usuario y los ordena
+        comments: { 
+          include: { user: { select: { username: true } } },
+          orderBy: { createdAt: 'asc' } 
+        } 
       }
     });
 
@@ -265,15 +264,21 @@ exports.getCreatorPosts = async (req, res) => {
 exports.toggleLike = async (req, res) => {
   try {
     const { id } = req.params;
+    const { emoji } = req.body; // 🔥 FIX LIKES: Leemos el emoji que envia el frontend
     const userId = req.user.userId;
+    
     const existingLike = await prisma.like.findFirst({ where: { postId: id, userId } });
 
+    // Si ya le dio like, se lo quitamos
     if (existingLike) {
       await prisma.like.delete({ where: { id: existingLike.id } });
       return res.status(200).json({ message: 'Like eliminado' });
     }
 
-    await prisma.like.create({ data: { postId: id, userId, emoji: '❤️' } });
+    // Si no tenía like, se lo creamos con el emoji especificado (o ❤️ por defecto)
+    await prisma.like.create({ 
+      data: { postId: id, userId, emoji: emoji || '❤️' } 
+    });
     res.status(201).json({ message: 'Like agregado' });
   } catch (error) {
     res.status(500).json({ error: 'Error en el like.' });
