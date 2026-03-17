@@ -11,6 +11,8 @@ const { Server } = require('socket.io');
 // Importación de Tareas en Segundo Plano (Cron Jobs)
 const { startSubscriptionCron } = require('./utils/subscriptionCron'); 
 const startBalanceReleaser = require('./cron/balanceReleaser'); 
+const cron = require('node-cron'); // 🔥 NUEVO: El Reloj Biológico
+const postController = require('./controllers/postController'); // 🔥 NUEVO: Para el escáner Anti-IA
 
 // ==========================================
 // 1. INICIALIZACIÓN Y MONITOREO (Sentry)
@@ -31,7 +33,6 @@ const PORT = process.env.PORT || 5000;
 // ==========================================
 // 2. SISTEMA MAESTRO DE WEBSOCKETS (TIEMPO REAL)
 // ==========================================
-// 🔥 Creamos UN SOLO motor de WebSockets (io) para toda la plataforma
 const io = new Server(server, {
   cors: {
     origin: process.env.FRONTEND_URL || "http://localhost:3000",
@@ -39,10 +40,8 @@ const io = new Server(server, {
   }
 });
 
-// 🔌 CONECTAMOS AMBAS ANTENAS AL MISMO MOTOR (Ya no chocarán)
 try {
   const socketHandler = require('./utils/socketHandler');
-  // Le pasamos la instancia de 'io' directamente para que el messageController pueda usarla
   if (typeof socketHandler.init === 'function') {
       socketHandler.init(io); 
   }
@@ -51,7 +50,6 @@ try {
   console.log("⚠️ Aviso: Antena de Chat requiere revisión, pero el servidor sigue vivo.");
 }
 
-// Conectamos la Antena del Live Streaming
 try {
   require('./sockets/liveSocket')(io);
   console.log("✅ Antena de Live Streaming conectada.");
@@ -63,18 +61,14 @@ try {
 // 3. MIDDLEWARES GLOBALES (El Filtro)
 // ==========================================
 app.use(cors());
-
-// 🔥 CRÍTICO:  requiere que TODO se parsee como JSON antes de llegar a las rutas
 app.use(express.json()); 
-
-// Carpeta pública de archivos (Fotos/Videos)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==========================================
 // 4. ESCUDO ANTI-BOTS (Rate Limiting)
 // ==========================================
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
+  windowMs: 15 * 60 * 1000, 
   max: 10, 
   message: { error: 'Demasiados intentos desde esta IP, por favor intenta más tarde. 🛡️' }
 });
@@ -86,10 +80,7 @@ app.get('/', (req, res) => {
   res.json({ message: 'Motor Unicornio funcionando y blindado 🚀' });
 });
 
-// Rutas con Escudo
 app.use('/api/auth', authLimiter, require('./routes/authRoutes'));
-
-// Rutas Core
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/profile', require('./routes/profileRoutes'));
 app.use('/api/content', require('./routes/contentRoutes'));
@@ -99,22 +90,18 @@ app.use('/api/explore', require('./routes/exploreRoutes'));
 app.use('/api/discover', require('./routes/discoverRoutes'));
 app.use('/api/bookmarks', require('./routes/bookmarkRoutes'));
 
-// Rutas de Monetización, Promociones y Pagos
 app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/webhooks', require('./routes/webhookRoutes')); 
 app.use('/api/finance', require('./routes/monetizationRoutes'));
 app.use('/api/wallet', require('./routes/walletRoutes')); 
 app.use('/api/bundles', require('./routes/bundleRoutes'));
-// ❌ ELIMINADA: app.use('/api/discounts', require('./routes/discountRoutes')); <-- ¡Fantasma erradicado!
 app.use('/api/coupons', require('./routes/couponRoutes'));
 app.use('/api/promotions', require('./routes/promotionRoutes')); 
 
-// 💬 RUTAS SOCIALES Y STREAMING (Corregidas y Unificadas)
 app.use('/api/messages', require('./routes/messageRoutes'));
 app.use('/api/live', require('./routes/liveRoutes'));
 app.use('/api/fans', require('./routes/fanRoutes'));
 
-// Rutas de Administración y Sistema
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 app.use('/api/moderation', require('./routes/moderationRoutes'));
@@ -137,6 +124,34 @@ Sentry.setupExpressErrorHandler(app);
 startSubscriptionCron(); 
 startBalanceReleaser(); 
 console.log('🤖 Motores de Automatización (Suscripciones y Saldos) Activados.');
+
+// 🔥 EL PERRO GUARDIÁN: Patrulla Anti-IA todos los días a las 3:00 AM
+cron.schedule('0 3 * * *', async () => {
+  console.log('🐕 [CRON] Despertando al Perro Guardián Anti-IA...');
+  
+  const mockReq = {};
+  const mockRes = {
+    status: function(code) {
+      return {
+        json: function(data) {
+          console.log(`🐕 [CRON] Patrullaje finalizado (Status: ${code}):`, data);
+        }
+      };
+    }
+  };
+
+  try {
+    // Si la función existe en el controlador, la ejecutamos
+    if (typeof postController.scanExistingPostsForAI === 'function') {
+      await postController.scanExistingPostsForAI(mockReq, mockRes);
+    } else {
+      console.log('⚠️ [CRON] La función scanExistingPostsForAI no se encontró en postController.');
+    }
+  } catch (error) {
+    console.error('❌ [CRON] Error durante el patrullaje Anti-IA:', error);
+  }
+});
+console.log('⏳ Reloj Biológico (Cron) activado. El Perro Guardián patrullará a las 3:00 AM.');
 
 // ==========================================
 // 7. ENCENDIDO DEL SERVIDOR
