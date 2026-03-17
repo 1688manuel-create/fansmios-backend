@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const fs = require('fs');
-const cloudinary = require('../config/cloudinary'); // 🔥 IMPORTAMOS LA BÓVEDA
+const { cloudinary } = require('../utils/cloudinaryConfig');
 const upload = require('../middlewares/uploadMiddleware'); 
 const { verifyToken } = require('../middlewares/authMiddleware');
 
