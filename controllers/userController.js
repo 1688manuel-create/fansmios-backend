@@ -2,6 +2,7 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const bcrypt = require('bcryptjs'); // Asegúrate de que esto esté arriba del archivo si no lo tienes
+const { cloudinary } = require('../utils/cloudinaryConfig');
 
 // ==========================================
 // 1. FAN: Convertirse en Creador
@@ -78,10 +79,16 @@ exports.updateProfile = async (req, res) => {
 
     console.log("💾 DATOS LISTOS PARA GUARDARSE EN LA BD:", profileData);
 
-    // 3. Atrapamos las IMÁGENES
+    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary
     if (req.files) {
-      if (req.files.profileImage && req.files.profileImage.length > 0) profileData.profileImage = `/uploads/${req.files.profileImage[0].filename}`;
-      if (req.files.coverImage && req.files.coverImage.length > 0) profileData.coverImage = `/uploads/${req.files.coverImage[0].filename}`;
+      if (req.files.profileImage && req.files.profileImage.length > 0) {
+        const result = await cloudinary.uploader.upload(req.files.profileImage[0].path, { folder: "fansmios_profiles" });
+        profileData.profileImage = result.secure_url;
+      }
+      if (req.files.coverImage && req.files.coverImage.length > 0) {
+        const result = await cloudinary.uploader.upload(req.files.coverImage[0].path, { folder: "fansmios_profiles" });
+        profileData.coverImage = result.secure_url;
+      }
     }
 
     // 4. Inyectamos los datos
