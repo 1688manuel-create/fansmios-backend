@@ -35,7 +35,8 @@ const checkAI = async (filePath) => {
       headers: data.getHeaders()
     });
 
-    if (response.data?.type?.ai_generated > 0.8) {
+    // 🔥 BAJAMOS LA TOLERANCIA AL 50% (0.5) EN EL ESCÁNER RETROACTIVO
+    if (response.data?.type?.ai_generated > 0.5) {
       return { isAI: true, score: response.data.type.ai_generated };
     }
     return { isAI: false, score: response.data?.type?.ai_generated || 0 };
@@ -63,20 +64,30 @@ exports.createPost = async (req, res) => {
       return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
     }
 
+    // 🤖 RADAR ANTI-IA MEJORADO Y BLINDADO
     if (req.file && req.file.mimetype.startsWith('image/')) {
       if (process.env.SIGHTENGINE_USER && process.env.SIGHTENGINE_SECRET) {
         try {
+          console.log(`🔍 Enviando al radar anti-IA: ${mediaUrl}`);
           const response = await axios.get('https://api.sightengine.com/1.0/check.json', {
             params: { url: mediaUrl, models: 'genai', api_user: process.env.SIGHTENGINE_USER, api_secret: process.env.SIGHTENGINE_SECRET }
           });
-          if (response.data?.type?.ai_generated > 0.8) {
+          
+          console.log("📊 Puntaje Sightengine:", response.data.type);
+
+          // 🔥 BAJAMOS LA TOLERANCIA AL 50% (0.5) PARA BLOQUEAR MÁS RÁPIDO
+          if (response.data?.type?.ai_generated > 0.5) {
             const probability = (response.data.type.ai_generated * 100).toFixed(2);
             if (req.file && req.file.filename) {
               await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("No se pudo borrar de nube"));
             }
             return res.status(403).json({ error: `Imagen IA Detectada (${probability}%). Fansmios solo permite contenido real. 🤖🚫` });
           }
-        } catch (apiError) { console.error("⚠️ Error conectando con Sightengine."); }
+        } catch (apiError) { 
+          console.error("⚠️ Error conectando con Sightengine:", apiError.response?.data || apiError.message); 
+        }
+      } else {
+        console.log("⚠️ RADAR APAGADO: Faltan variables SIGHTENGINE_USER o SIGHTENGINE_SECRET en Coolify.");
       }
     }
 
@@ -129,7 +140,7 @@ exports.getAllPosts = async (req, res) => {
         user: { select: { id: true, email: true, username: true, creatorProfile: { select: { profileImage: true } }, subscribers: { where: { fanId: userId } }, promotions: { where: { active: true, expiresAt: { gt: new Date() } }, select: { package: true } } } },
         _count: { select: { comments: true } },
         purchases: { where: { fanId: userId } },
-        likes: { select: { id: true, emoji: true, userId: true } }, // 🔥 Traemos todos los likes para contarlos por emoji
+        likes: { select: { id: true, emoji: true, userId: true } }, 
         comments: { include: { user: { select: { username: true } } }, orderBy: { createdAt: 'asc' } } 
       }
     });
@@ -152,7 +163,6 @@ exports.getAllPosts = async (req, res) => {
       let weight = 0;
       if(activePromo === 'GOD') weight = 3; if(activePromo === 'PRO') weight = 2; if(activePromo === 'BASIC') weight = 1;
 
-      // 🔥 LÓGICA DE CONTEO POR EMOJI
       const myReactionObj = post.likes.find(l => l.userId === userId);
       const reactionCounts = { '❤️': 0, '❤️‍🔥': 0, '🤤': 0, '🫦': 0 };
       post.likes.forEach(l => {
@@ -163,7 +173,7 @@ exports.getAllPosts = async (req, res) => {
       const formattedPost = { 
         ...post, hasAccess, 
         myReaction: myReactionObj ? myReactionObj.emoji : null, 
-        reactionCounts, // Pasamos el conteo exacto al frontend
+        reactionCounts,
         content: hasAccess ? post.content : null, 
         mediaUrl: hasAccess ? post.mediaUrl : null,
         isPromoted: !!activePromo, promoTier: activePromo, weight
@@ -211,10 +221,10 @@ exports.toggleLike = async (req, res) => {
 
     if (existingLike) {
       if (existingLike.emoji === emoji) {
-        await prisma.like.delete({ where: { id: existingLike.id } }); // Mismo emoji = Quitar reacción
+        await prisma.like.delete({ where: { id: existingLike.id } }); 
         return res.status(200).json({ message: 'Like eliminado' });
       } else {
-        await prisma.like.update({ where: { id: existingLike.id }, data: { emoji } }); // Diferente emoji = Actualizar
+        await prisma.like.update({ where: { id: existingLike.id }, data: { emoji } }); 
         return res.status(200).json({ message: 'Like actualizado' });
       }
     }
@@ -227,7 +237,6 @@ exports.toggleLike = async (req, res) => {
 exports.addComment = async (req, res) => {
   try {
     const { id } = req.params;
-    // 🔥 FIX: Ahora el backend recibe y lee el parentId (el ID del comentario original)
     const { content, parentId } = req.body; 
     const userId = req.user.userId;
 
@@ -236,7 +245,7 @@ exports.addComment = async (req, res) => {
         content, 
         postId: id, 
         userId,
-        parentId: parentId || null // 🔥 FIX: Guardamos quién es el papá en la base de datos
+        parentId: parentId || null 
       }
     });
     res.status(201).json(comment);
@@ -247,6 +256,7 @@ exports.addComment = async (req, res) => {
 
 exports.toggleCommentLike = async (req, res) => { res.status(200).json({ message: 'Funcionalidad activa.' }); };
 exports.buyBoost = async (req, res) => { res.status(200).json({ message: 'Pasarela lista.' }); };
+
 exports.deletePost = async (req, res) => {
   try {
     const { id } = req.params;
@@ -270,13 +280,12 @@ exports.deletePost = async (req, res) => {
 
 exports.deleteComment = async (req, res) => {
   try {
-    const { id } = req.params; // ID del comentario (la ruta dirá /posts/comments/:id)
+    const { id } = req.params; 
     const userId = req.user.userId;
 
     const comment = await prisma.comment.findUnique({ where: { id } });
     if (!comment) return res.status(404).json({ error: 'Comentario no encontrado' });
 
-    // Solo permitimos borrar si es el dueño del comentario
     if (comment.userId !== userId) {
       return res.status(403).json({ error: 'No autorizado' });
     }
