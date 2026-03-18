@@ -192,20 +192,30 @@ exports.getCreatorPosts = async (req, res) => {
     const userId = req.user?.userId; 
     const posts = await prisma.post.findMany({
       where: { user: { username: username, status: 'ACTIVE' } }, orderBy: { createdAt: 'desc' },
-      include: { user: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } } } }, _count: { select: { comments: true } }, likes: { select: { id: true, emoji: true, userId: true } } }
+      include: { 
+        user: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } }, subscribers: { where: { fanId: userId, status: 'ACTIVE' } } } }, 
+        _count: { select: { comments: true } }, 
+        likes: { select: { id: true, emoji: true, userId: true } },
+        purchases: { where: { fanId: userId } }
+      }
     });
     
+    let isSubscribed = false;
+
     const formattedPosts = posts.map(post => {
+      if (post.user?.subscribers?.length > 0) isSubscribed = true;
+      const hasAccess = post.userId === userId || post.purchases?.length > 0 || (isSubscribed && !post.isPPV);
+
       const myReactionObj = post.likes.find(l => l.userId === userId);
       const reactionCounts = { '❤️': 0, '❤️‍🔥': 0, '🤤': 0, '🫦': 0 };
       post.likes.forEach(l => {
         if (reactionCounts[l.emoji] !== undefined) reactionCounts[l.emoji]++;
         else reactionCounts[l.emoji] = 1;
       });
-      return { ...post, hasAccess: post.userId === userId, myReaction: myReactionObj ? myReactionObj.emoji : null, reactionCounts };
+      return { ...post, hasAccess, myReaction: myReactionObj ? myReactionObj.emoji : null, reactionCounts };
     });
 
-    res.status(200).json({ posts: formattedPosts });
+    res.status(200).json({ posts: formattedPosts, isSubscribed });
   } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
 
