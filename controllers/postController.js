@@ -237,14 +237,14 @@ exports.toggleLike = async (req, res) => {
 
     await prisma.like.create({ data: { postId: id, userId, emoji: emoji || '❤️' } });
     
-    // 🔥 NOTIFICACIÓN CON EL ANCLA AL POST EXACTO
+    // 🔥 NOTIFICACIÓN AL FEED
     if (post.userId !== userId) {
       await prisma.notification.create({
         data: {
           userId: post.userId,
           type: 'LIKE',
           content: `@${fan.username} reaccionó con ${emoji || '❤️'} a tu publicación.`,
-          link: `/${post.user.username}#post-${post.id}`
+          link: `/feed#post-${post.id}` // <-- AQUÍ ESTÁ EL CAMBIO
         }
       });
     }
@@ -281,7 +281,7 @@ exports.addComment = async (req, res) => {
             userId: parentComment.userId,
             type: 'REPLY',
             content: `@${fan.username} respondió a tu comentario: "${content.substring(0, 30)}..."`,
-            link: `/${post.user.username}#post-${post.id}` 
+            link: `/feed#post-${post.id}` // <-- AQUÍ ESTÁ EL CAMBIO 
           }
         });
       }
@@ -292,7 +292,7 @@ exports.addComment = async (req, res) => {
             userId: post.userId,
             type: 'COMMENT',
             content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
-            link: `/${post.user.username}#post-${post.id}` 
+            link: `/feed#post-${post.id}` // <-- AQUÍ ESTÁ EL CAMBIO 
           }
         });
       }
