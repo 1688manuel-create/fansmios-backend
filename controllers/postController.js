@@ -212,11 +212,24 @@ exports.getCreatorPosts = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
 
+// backend/controllers/postController.js (Solo reemplaza estas dos funciones)
+
 exports.toggleLike = async (req, res) => {
   try {
     const { id } = req.params;
     const { emoji } = req.body;
     const userId = req.user.userId;
+    
+    // Traemos el post para saber a quién notificar
+    const post = await prisma.post.findUnique({ 
+      where: { id },
+      include: { user: { select: { id: true, username: true } } } 
+    });
+    
+    if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
+    
+    const fan = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
+
     const existingLike = await prisma.like.findFirst({ where: { postId: id, userId } });
 
     if (existingLike) {
@@ -230,8 +243,23 @@ exports.toggleLike = async (req, res) => {
     }
 
     await prisma.like.create({ data: { postId: id, userId, emoji: emoji || '❤️' } });
+    
+    // 🔔 DISPARAR NOTIFICACIÓN AL CREADOR (Si no es su propio post)
+    if (post.userId !== userId) {
+      await prisma.notification.create({
+        data: {
+          userId: post.userId,
+          type: 'LIKE',
+          content: `@${fan.username} reaccionó con ${emoji || '❤️'} a tu publicación.`,
+          link: `/${post.user.username}` // O el link directo al post si tuvieras página individual
+        }
+      });
+    }
+
     res.status(201).json({ message: 'Like agregado' });
-  } catch (error) { res.status(500).json({ error: 'Error en el like.' }); }
+  } catch (error) { 
+    res.status(500).json({ error: 'Error en el like.' }); 
+  }
 };
 
 exports.addComment = async (req, res) => {
@@ -240,14 +268,47 @@ exports.addComment = async (req, res) => {
     const { content, parentId } = req.body; 
     const userId = req.user.userId;
 
-    const comment = await prisma.comment.create({
-      data: { 
-        content, 
-        postId: id, 
-        userId,
-        parentId: parentId || null 
-      }
+    const post = await prisma.post.findUnique({ 
+      where: { id },
+      include: { user: { select: { id: true, username: true } } }
     });
+
+    if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
+
+    const fan = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
+
+    const comment = await prisma.comment.create({
+      data: { content, postId: id, userId, parentId: parentId || null }
+    });
+
+    // 🔔 DISPARAR NOTIFICACIONES
+    if (parentId) {
+      // 1. Si es una respuesta a otro comentario, notificamos al dueño del comentario padre
+      const parentComment = await prisma.comment.findUnique({ where: { id: parentId } });
+      if (parentComment && parentComment.userId !== userId) {
+        await prisma.notification.create({
+          data: {
+            userId: parentComment.userId,
+            type: 'REPLY',
+            content: `@${fan.username} respondió a tu comentario: "${content.substring(0, 30)}..."`,
+            link: `/${post.user.username}` 
+          }
+        });
+      }
+    } else {
+      // 2. Si es un comentario normal en el post, notificamos al creador
+      if (post.userId !== userId) {
+        await prisma.notification.create({
+          data: {
+            userId: post.userId,
+            type: 'COMMENT',
+            content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
+            link: `/${post.user.username}` 
+          }
+        });
+      }
+    }
+
     res.status(201).json(comment);
   } catch (error) { 
     res.status(500).json({ error: 'Error al comentar.' }); 

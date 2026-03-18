@@ -45,7 +45,7 @@ exports.getConversations = async (req, res) => {
 };
 
 // ==========================================
-// 0.5 OBTENER TOTAL DE MENSAJES SIN LEER (Este faltaba y causó el crash)
+// 0.5 OBTENER TOTAL DE MENSAJES SIN LEER
 // ==========================================
 exports.getUnreadCount = async (req, res) => {
   try {
@@ -58,15 +58,14 @@ exports.getUnreadCount = async (req, res) => {
 };
 
 // ==========================================
-// 1. OBTENER HISTORIAL DE UNA CONVERSACIÓN (CON MODO DIOS 👑)
+// 1. OBTENER HISTORIAL DE UNA CONVERSACIÓN
 // ==========================================
 exports.getConversation = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const userRole = req.user.role; // Detectamos si eres el CEO
+    const userRole = req.user.role; 
     const { conversationId } = req.params;
 
-    // Solo marcamos como leídos si NO eres el admin espiando
     if (userRole !== 'ADMIN') {
       await prisma.message.updateMany({
         where: { conversationId: conversationId, receiverId: userId, isRead: false },
@@ -82,7 +81,6 @@ exports.getConversation = async (req, res) => {
 
     const secureMessages = messages.map(msg => {
       const isSender = msg.senderId === userId;
-      // LA MAGIA: Si eres ADMIN, el candado se rompe
       const isUnlocked = msg.purchases.length > 0 || userRole === 'ADMIN'; 
 
       if (!msg.isPPV || isSender || isUnlocked) {
@@ -99,7 +97,7 @@ exports.getConversation = async (req, res) => {
 };
 
 // ==========================================
-// 2. ENVIAR MENSAJE INDIVIDUAL
+// 2. ENVIAR MENSAJE E INYECTAR NOTIFICACIÓN 🔔
 // ==========================================
 exports.sendMessage = async (req, res) => {
   try {
@@ -149,6 +147,21 @@ exports.sendMessage = async (req, res) => {
     await prisma.conversation.update({
       where: { id: activeConvId },
       data: { updatedAt: new Date() }
+    });
+
+    // 🔥 BUSCAMOS AL REMITENTE PARA SABER SU NOMBRE
+    const senderInfo = await prisma.user.findUnique({
+      where: { id: senderId }, select: { username: true }
+    });
+
+    // 🔔 DISPARAMOS LA NOTIFICACIÓN A LA CAMPANITA
+    await prisma.notification.create({
+      data: {
+        userId: receiverId, // A quién le llega
+        type: 'MESSAGE',
+        content: `Tienes un nuevo mensaje de @${senderInfo?.username || 'Usuario'}. 💬`,
+        link: '/dashboard/messages' // A dónde lo lleva al darle clic
+      }
     });
 
     try {
@@ -223,7 +236,6 @@ exports.deleteMessage = async (req, res) => {
 // ==========================================
 exports.sendBroadcast = async (req, res) => {
   try {
-    // Lógica simplificada de broadcast
     res.status(200).json({ message: 'Bomba lanzada 🚀! Mensaje entregado a tus fans.' });
   } catch (error) {
     res.status(500).json({ error: 'Error al enviar broadcast' });

@@ -7,13 +7,12 @@ const { sendPushNotification } = require('../utils/pushService');
 // ==========================================
 // 🏦 MOTOR PAYRAM: PROCESADOR INSTANTÁNEO
 // ==========================================
+
 exports.createPaymentIntent = async (req, res) => {
   try {
     let { amount, type, description, couponCode, creatorId, postId, bundleId, messageId, attachedMessage } = req.body; 
     const fanId = req.user.userId;
 
-    // 🛡️ TRADUCTOR DE ETIQUETAS (Evita el error de Prisma)
-    // Si el frontend envía "POST", lo corregimos a "PPV_POST" para que coincida con la DB
     if (type === 'POST') type = 'PPV_POST';
     if (type === 'MESSAGE') type = 'PPV_MESSAGE';
     
@@ -22,7 +21,6 @@ exports.createPaymentIntent = async (req, res) => {
     let finalAmount = parseFloat(amount);
     let appliedCouponId = null;
 
-    // 🎟️ LÓGICA DE CUPONES
     if (couponCode && creatorId && type !== 'TIP') {
       const coupon = await prisma.coupon.findUnique({ where: { code: couponCode.toUpperCase() } });
       if (coupon && coupon.creatorId === creatorId && coupon.active) {
@@ -38,41 +36,29 @@ exports.createPaymentIntent = async (req, res) => {
 
     if (finalAmount < 0.50) finalAmount = 0.50;
 
-    // 🏦 REGLAS DE COMISIÓN (20% por defecto, 30% en Live)
     let feePercent = (type === 'LIVE_TICKET' || type === 'PPV_LIVE') ? 0.30 : 0.20;
     const platformFee = finalAmount * feePercent; 
     const netAmount = finalAmount - platformFee;
-
-    // Generación de Recibo Único de PayRam
     const payramReceiptId = `PAYRAM-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 
-    // 🛡️ TRANSACCIÓN ATÓMICA
+    // Obtener nombres para la notificación
+    const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true } });
+    
+    // TRANSACCIÓN ATÓMICA
     await prisma.$transaction(async (db) => {
-      // 1. Crear registro contable completado
       const tx = await db.transaction.create({
-        data: {
-          senderId: fanId,
-          receiverId: creatorId,
-          type: type, // Ahora es un tipo válido (ej: PPV_POST)
-          status: 'COMPLETED',
-          amount: finalAmount,
-          platformFee,
-          netAmount,
-          postId,
-          bundleId,
-          attachedMessage: messageId || attachedMessage,
-          payramReceiptId
-        }
+        data: { senderId: fanId, receiverId: creatorId, type: type, status: 'COMPLETED', amount: finalAmount, platformFee, netAmount, postId, bundleId, attachedMessage: messageId || attachedMessage, payramReceiptId }
       });
 
-      // 2. Cargar billetera del creador (Saldo Pendiente)
       await db.wallet.upsert({
         where: { userId: creatorId },
         update: { pendingBalance: { increment: netAmount } },
         create: { userId: creatorId, pendingBalance: netAmount }
       });
 
-      // 3. Activación de Producto según tipo
+      let notificationMessage = '';
+      let notificationType = 'MONEY';
+
       if (type === 'SUBSCRIPTION') {
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + 30);
@@ -81,16 +67,44 @@ exports.createPaymentIntent = async (req, res) => {
           update: { status: 'ACTIVE', endDate },
           create: { fanId, creatorId, status: 'ACTIVE', price: finalAmount, endDate }
         });
+        notificationMessage = `¡Nuevo Suscriptor! @${fan.username} se ha suscrito a tu perfil por $${finalAmount}. 🎉`;
+        notificationType = 'SUBSCRIPTION';
+
       } else if (type === 'PPV_POST') {
         await db.postPurchase.create({ data: { fanId, postId, pricePaid: finalAmount } });
+        notificationMessage = `@${fan.username} desbloqueó tu publicación PPV por $${finalAmount}. 🔓`;
+        notificationType = 'PPV_SALE';
+
       } else if (type === 'PPV_MESSAGE') {
         await db.messagePurchase.create({ data: { fanId, messageId: attachedMessage, pricePaid: finalAmount } });
         await db.message.update({ where: { id: attachedMessage }, data: { isUnlocked: true } });
+        notificationMessage = `@${fan.username} desbloqueó tu mensaje privado por $${finalAmount}. 💌`;
+        notificationType = 'MESSAGE_SALE';
+
       } else if (type === 'BUNDLE') {
         const bundle = await db.bundle.findUnique({ where: { id: bundleId }, include: { posts: true } });
         await db.bundlePurchase.create({ data: { fanId, bundleId, pricePaid: finalAmount } });
         const postPurchasesData = bundle.posts.map(p => ({ fanId, postId: p.id, pricePaid: 0 }));
         await db.postPurchase.createMany({ data: postPurchasesData, skipDuplicates: true });
+        notificationMessage = `@${fan.username} compró tu paquete "${bundle.title}" por $${finalAmount}. 📦`;
+        notificationType = 'BUNDLE_SALE';
+
+      } else if (type === 'TIP') {
+        // En TIPS guardamos el mensaje en attachedMessage
+        notificationMessage = `@${fan.username} te ha enviado una propina de $${finalAmount}! 💸 "${description || '¡Gracias!'}"`;
+        notificationType = 'TIP';
+      }
+
+      // 🔔 DISPARAR NOTIFICACIÓN AL CREADOR SIEMPRE QUE HAYA DINERO
+      if (creatorId !== fanId) {
+        await db.notification.create({
+          data: {
+            userId: creatorId,
+            type: notificationType,
+            content: notificationMessage,
+            link: '/dashboard/wallet' // Lo mandamos a su billetera para que vea el dinero
+          }
+        });
       }
     });
 
