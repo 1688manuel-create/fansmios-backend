@@ -237,14 +237,14 @@ exports.toggleLike = async (req, res) => {
 
     await prisma.like.create({ data: { postId: id, userId, emoji: emoji || '❤️' } });
     
-    // 🔥 NOTIFICACIÓN AL FEED
     if (post.userId !== userId) {
       await prisma.notification.create({
         data: {
           userId: post.userId,
           type: 'LIKE',
           content: `@${fan.username} reaccionó con ${emoji || '❤️'} a tu publicación.`,
-          link: `/feed#post-${post.id}` // <-- AQUÍ ESTÁ EL CAMBIO
+          // Para Likes solo apuntamos al post
+          link: `/feed#post-${post.id}`
         }
       });
     }
@@ -268,11 +268,11 @@ exports.addComment = async (req, res) => {
 
     const fan = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
 
+    // 1. Creamos el comentario y obtenemos su ID real
     const comment = await prisma.comment.create({
       data: { content, postId: id, userId, parentId: parentId || null }
     });
 
-    // 🔥 NOTIFICACIÓN CON EL ANCLA AL POST EXACTO
     if (parentId) {
       const parentComment = await prisma.comment.findUnique({ where: { id: parentId } });
       if (parentComment && parentComment.userId !== userId) {
@@ -281,7 +281,8 @@ exports.addComment = async (req, res) => {
             userId: parentComment.userId,
             type: 'REPLY',
             content: `@${fan.username} respondió a tu comentario: "${content.substring(0, 30)}..."`,
-            link: `/feed#post-${post.id}` // <-- AQUÍ ESTÁ EL CAMBIO 
+            // 🔥 AQUÍ APUNTAMOS EXACTAMENTE AL COMENTARIO NUEVO
+            link: `/feed#post-${post.id}-comment-${comment.id}` 
           }
         });
       }
@@ -292,7 +293,8 @@ exports.addComment = async (req, res) => {
             userId: post.userId,
             type: 'COMMENT',
             content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
-            link: `/feed#post-${post.id}` // <-- AQUÍ ESTÁ EL CAMBIO 
+            // 🔥 AQUÍ APUNTAMOS EXACTAMENTE AL COMENTARIO NUEVO
+            link: `/feed#post-${post.id}-comment-${comment.id}` 
           }
         });
       }
