@@ -17,5 +17,6 @@ router.post('/:id/comment', verifyToken, postController.addComment);
 router.post('/comment/:id/like', verifyToken, postController.toggleCommentLike);
 router.post('/:id/boost', verifyToken, postController.buyBoost);
 router.delete('/:id', verifyToken, postController.deletePost);
+router.delete('/comments/:id', verifyToken, postController.deleteComment);
 
 module.exports = router;

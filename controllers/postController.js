@@ -267,3 +267,24 @@ exports.deletePost = async (req, res) => {
     res.status(200).json({ message: 'Post eliminado con éxito.' });
   } catch (error) { res.status(500).json({ error: 'Error al eliminar.' }); }
 };
+
+exports.deleteComment = async (req, res) => {
+  try {
+    const { id } = req.params; // ID del comentario (la ruta dirá /posts/comments/:id)
+    const userId = req.user.userId;
+
+    const comment = await prisma.comment.findUnique({ where: { id } });
+    if (!comment) return res.status(404).json({ error: 'Comentario no encontrado' });
+
+    // Solo permitimos borrar si es el dueño del comentario
+    if (comment.userId !== userId) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    await prisma.comment.delete({ where: { id } });
+    res.status(200).json({ message: 'Comentario eliminado exitosamente' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error interno al eliminar comentario.' });
+  }
+};
