@@ -35,7 +35,6 @@ const checkAI = async (filePath) => {
       headers: data.getHeaders()
     });
 
-    // 🔥 BAJAMOS LA TOLERANCIA AL 50% (0.5) EN EL ESCÁNER RETROACTIVO
     if (response.data?.type?.ai_generated > 0.5) {
       return { isAI: true, score: response.data.type.ai_generated };
     }
@@ -64,7 +63,6 @@ exports.createPost = async (req, res) => {
       return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
     }
 
-    // 🤖 RADAR ANTI-IA MEJORADO Y BLINDADO
     if (req.file && req.file.mimetype.startsWith('image/')) {
       if (process.env.SIGHTENGINE_USER && process.env.SIGHTENGINE_SECRET) {
         try {
@@ -75,7 +73,6 @@ exports.createPost = async (req, res) => {
           
           console.log("📊 Puntaje Sightengine:", response.data.type);
 
-          // 🔥 BAJAMOS LA TOLERANCIA AL 50% (0.5) PARA BLOQUEAR MÁS RÁPIDO
           if (response.data?.type?.ai_generated > 0.5) {
             const probability = (response.data.type.ai_generated * 100).toFixed(2);
             if (req.file && req.file.filename) {
@@ -212,15 +209,12 @@ exports.getCreatorPosts = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
 
-// backend/controllers/postController.js (Solo reemplaza estas dos funciones)
-
 exports.toggleLike = async (req, res) => {
   try {
     const { id } = req.params;
     const { emoji } = req.body;
     const userId = req.user.userId;
     
-    // Traemos el post para saber a quién notificar
     const post = await prisma.post.findUnique({ 
       where: { id },
       include: { user: { select: { id: true, username: true } } } 
@@ -229,7 +223,6 @@ exports.toggleLike = async (req, res) => {
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
     
     const fan = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
-
     const existingLike = await prisma.like.findFirst({ where: { postId: id, userId } });
 
     if (existingLike) {
@@ -244,22 +237,20 @@ exports.toggleLike = async (req, res) => {
 
     await prisma.like.create({ data: { postId: id, userId, emoji: emoji || '❤️' } });
     
-    // 🔔 DISPARAR NOTIFICACIÓN AL CREADOR (Si no es su propio post)
+    // 🔥 NOTIFICACIÓN CON EL ANCLA AL POST EXACTO
     if (post.userId !== userId) {
       await prisma.notification.create({
         data: {
           userId: post.userId,
           type: 'LIKE',
           content: `@${fan.username} reaccionó con ${emoji || '❤️'} a tu publicación.`,
-          link: `/${post.user.username}` // O el link directo al post si tuvieras página individual
+          link: `/${post.user.username}#post-${post.id}`
         }
       });
     }
 
     res.status(201).json({ message: 'Like agregado' });
-  } catch (error) { 
-    res.status(500).json({ error: 'Error en el like.' }); 
-  }
+  } catch (error) { res.status(500).json({ error: 'Error en el like.' }); }
 };
 
 exports.addComment = async (req, res) => {
@@ -281,9 +272,8 @@ exports.addComment = async (req, res) => {
       data: { content, postId: id, userId, parentId: parentId || null }
     });
 
-    // 🔔 DISPARAR NOTIFICACIONES
+    // 🔥 NOTIFICACIÓN CON EL ANCLA AL POST EXACTO
     if (parentId) {
-      // 1. Si es una respuesta a otro comentario, notificamos al dueño del comentario padre
       const parentComment = await prisma.comment.findUnique({ where: { id: parentId } });
       if (parentComment && parentComment.userId !== userId) {
         await prisma.notification.create({
@@ -291,19 +281,18 @@ exports.addComment = async (req, res) => {
             userId: parentComment.userId,
             type: 'REPLY',
             content: `@${fan.username} respondió a tu comentario: "${content.substring(0, 30)}..."`,
-            link: `/${post.user.username}` 
+            link: `/${post.user.username}#post-${post.id}` 
           }
         });
       }
     } else {
-      // 2. Si es un comentario normal en el post, notificamos al creador
       if (post.userId !== userId) {
         await prisma.notification.create({
           data: {
             userId: post.userId,
             type: 'COMMENT',
             content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
-            link: `/${post.user.username}` 
+            link: `/${post.user.username}#post-${post.id}` 
           }
         });
       }
