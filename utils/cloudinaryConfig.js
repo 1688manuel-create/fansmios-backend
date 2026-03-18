@@ -11,13 +11,34 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// 2. Configuramos la bóveda donde se guardarán los archivos
+// 2. Configuramos la bóveda con INTELIGENCIA ARTIFICIAL DE RECORTE
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
-  params: {
-    folder: 'fansmios_uploads', // Carpeta principal en tu nube
-    allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webp', 'mov', 'webm', 'mp3', 'wav', 'ogg'], // 🚀 Ampliado para multimedia total
-    resource_type: 'auto' // Detecta automáticamente si es imagen, video o audio
+  params: async (req, file) => {
+    // Valores por defecto para posts normales
+    let folderName = 'fansmios_uploads';
+    let transformations = [];
+
+    // 🔥 MAGIA: Si detecta que están subiendo un Avatar
+    if (file.fieldname === 'profileImage') {
+      folderName = 'fansmios_avatares';
+      // Cuadrado perfecto (400x400), detecta la cara y recorta alrededor de ella
+      transformations = [{ width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto' }];
+    } 
+    // 🔥 MAGIA: Si detecta que están subiendo una Portada
+    else if (file.fieldname === 'coverImage') {
+      folderName = 'fansmios_portadas';
+      // Rectángulo panorámico (1920x1080), centrado
+      transformations = [{ width: 1920, height: 1080, crop: 'fill', gravity: 'center', quality: 'auto' }];
+    }
+
+    return {
+      folder: folderName,
+      allowed_formats: ['jpg', 'png', 'jpeg', 'mp4', 'webp', 'mov', 'webm', 'mp3', 'wav', 'ogg'],
+      resource_type: 'auto',
+      // Solo aplicamos transformación si es foto de perfil o portada
+      transformation: transformations.length > 0 ? transformations : undefined
+    };
   }
 });
 
