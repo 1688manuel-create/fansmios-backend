@@ -151,14 +151,14 @@ exports.getLiveStream = async (req, res) => {
     if (hasAccess && stream.playbackId) {
       // 🔥 PARCHE: Solo intentamos firmar si las variables de entorno existen y jwt está cargado
       if (process.env.MUX_SIGNING_KEY_ID && process.env.MUX_SIGNING_KEY_SECRET && jwt && jwt.signPlaybackId) {
-        try {
-          playbackToken = jwt.signPlaybackId(stream.playbackId, {
-            keyId: process.env.MUX_SIGNING_KEY_ID,
-            keySecret: process.env.MUX_SIGNING_KEY_SECRET,
-            expiration: '6h', 
-          });
-          safePlaybackId = "protected_stream"; 
-        } catch (err) {
+            try {
+              playbackToken = jwt.signPlaybackId(stream.playbackId, {
+                keyId: process.env.MUX_SIGNING_KEY_ID,
+                keySecret: process.env.MUX_SIGNING_KEY_SECRET,
+                expiration: '6h', 
+              });
+              safePlaybackId = stream.playbackId; // 🔥 Dejamos el ID real intacto
+            } catch (err) {
           console.error('🚨 Error firmando token Mux:', err.message);
           hasAccess = false; 
         }
