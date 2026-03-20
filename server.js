@@ -8,11 +8,14 @@ const Sentry = require('@sentry/node');
 const http = require('http');
 const { Server } = require('socket.io'); 
 
+// 🔥 NUEVO: El Cadenero VIP de LiveKit
+const { AccessToken } = require('livekit-server-sdk');
+
 // Importación de Tareas en Segundo Plano (Cron Jobs)
 const { startSubscriptionCron } = require('./utils/subscriptionCron'); 
 const startBalanceReleaser = require('./cron/balanceReleaser'); 
-const cron = require('node-cron'); // 🔥 NUEVO: El Reloj Biológico
-const postController = require('./controllers/postController'); // 🔥 NUEVO: Para el escáner Anti-IA
+const cron = require('node-cron'); 
+const postController = require('./controllers/postController'); 
 
 // ==========================================
 // 1. INICIALIZACIÓN Y MONITOREO (Sentry)
@@ -114,6 +117,36 @@ app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/profile/kyc', require('./routes/kycRoutes'));
 app.use('/api/2fa', require('./routes/auth2faRoutes'));
 
+// 🔥 NUEVO: RUTA PARA EL BOLETO DE LIVEKIT (EXPERIENCIA TIKTOK)
+app.post('/api/livekit/token', async (req, res) => {
+  try {
+    const { roomName, participantName, isCreator } = req.body;
+
+    const at = new AccessToken(
+      process.env.LIVEKIT_API_KEY,
+      process.env.LIVEKIT_API_SECRET,
+      {
+        identity: participantName,
+        ttl: '2h', 
+      }
+    );
+
+    at.addGrant({
+      roomJoin: true,
+      room: roomName,
+      canPublish: isCreator === true, 
+      canSubscribe: true,    
+    });
+
+    const token = await at.toJwt();
+    res.json({ token: token });
+
+  } catch (error) {
+    console.error("Error generando token de LiveKit:", error);
+    res.status(500).json({ error: "No se pudo generar el acceso al Live" });
+  }
+});
+
 // ==========================================
 // 6. TRABAJADORES Y MANEJO DE ERRORES
 // ==========================================
@@ -141,7 +174,6 @@ cron.schedule('0 3 * * *', async () => {
   };
 
   try {
-    // Si la función existe en el controlador, la ejecutamos
     if (typeof postController.scanExistingPostsForAI === 'function') {
       await postController.scanExistingPostsForAI(mockReq, mockRes);
     } else {
