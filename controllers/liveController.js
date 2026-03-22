@@ -241,14 +241,13 @@ exports.sendLiveMessage = async (req, res) => {
           data: { walletBalance: { increment: tipAmount } } 
         });
 
-        // 2. Creamos el recibo para el Dashboard (Corregido para evitar choques con el Schema)
+        // 2. Creamos el recibo MÁS BÁSICO para evitar que Prisma lo rechace
         await prisma.transaction.create({
           data: {
             senderId: userId,
             receiverId: stream.creatorId,
             amount: tipAmount,
-            type: 'DONATION', // Cambiado a DONATION, suele ser el estándar en tu schema
-            postId: streamId, // Agregado el ID de la transmisión (Obligatorio en muchos schemas)
+            type: 'TIP', // Volvemos a TIP que es el estándar
             status: 'COMPLETED'
           }
         });
