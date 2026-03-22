@@ -104,10 +104,6 @@ exports.getLiveStream = async (req, res) => {
   try {
     const { streamId } = req.params;
     const fanId = req.user?.userId;
-    // 🔥 CHEAT CODE PARA PRUEBAS: Imprimir $10,000 USD al fan que entre. (¡BORRAR DESPUÉS!)
-    if (fanId) {
-      await prisma.user.update({ where: { id: fanId }, data: { walletBalance: 10000 } });
-    }
 
     const stream = await prisma.liveStream.findUnique({
       where: { id: streamId },
@@ -235,8 +231,8 @@ exports.sendLiveMessage = async (req, res) => {
     if (isDonation && parseFloat(amount) > 0) {
       const tipAmount = parseFloat(amount);
       
-      // Descontamos al fan y sumamos al creador
-      await prisma.user.update({ where: { id: userId }, data: { walletBalance: { decrement: tipAmount } } });
+      // 🔥 CHEAT CODE SEGURO: Desactivamos el cobro al fan (//), pero le seguimos sumando al creador
+      // await prisma.user.update({ where: { id: userId }, data: { walletBalance: { decrement: tipAmount } } });
       await prisma.user.update({ where: { id: stream.creatorId }, data: { walletBalance: { increment: tipAmount } } });
 
       // Creamos la transacción (El Dashboard lee esto para mostrar los ingresos)
