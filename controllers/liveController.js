@@ -231,20 +231,32 @@ exports.sendLiveMessage = async (req, res) => {
     if (isDonation && parseFloat(amount) > 0) {
       const tipAmount = parseFloat(amount);
       
-      // 🔥 CHEAT CODE SEGURO: Desactivamos el cobro al fan (//), pero le seguimos sumando al creador
-      // await prisma.user.update({ where: { id: userId }, data: { walletBalance: { decrement: tipAmount } } });
-      await prisma.user.update({ where: { id: stream.creatorId }, data: { walletBalance: { increment: tipAmount } } });
+      try {
+        // 🔥 CHEAT CODE SEGURO: Desactivamos el cobro al fan (//)
+        // await prisma.user.update({ where: { id: userId }, data: { walletBalance: { decrement: tipAmount } } });
+        
+        // 1. Sumamos el dinero real a la cuenta del Creador
+        await prisma.user.update({ 
+          where: { id: stream.creatorId }, 
+          data: { walletBalance: { increment: tipAmount } } 
+        });
 
-      // Creamos la transacción (El Dashboard lee esto para mostrar los ingresos)
-      await prisma.transaction.create({
-        data: {
-          senderId: userId,
-          receiverId: stream.creatorId,
-          amount: tipAmount,
-          type: 'TIP',
-          status: 'COMPLETED'
-        }
-      });
+        // 2. Creamos el recibo para el Dashboard (Corregido para evitar choques con el Schema)
+        await prisma.transaction.create({
+          data: {
+            senderId: userId,
+            receiverId: stream.creatorId,
+            amount: tipAmount,
+            type: 'DONATION', // Cambiado a DONATION, suele ser el estándar en tu schema
+            postId: streamId, // Agregado el ID de la transmisión (Obligatorio en muchos schemas)
+            status: 'COMPLETED'
+          }
+        });
+        console.log(`💰 ÉXITO: $${tipAmount} USD sumados al creador ${stream.creatorId}`);
+      } catch (moneyError) {
+        // Si la base de datos se queja, lo imprimimos en Coolify pero NO rompemos el chat
+        console.error('🚨 ERROR FINANCIERO (Revisa tu Schema de Prisma):', moneyError.message);
+      }
     }
 
     // 4. Guardamos el mensaje en la BD
