@@ -232,29 +232,33 @@ exports.sendLiveMessage = async (req, res) => {
       const tipAmount = parseFloat(amount);
       
       try {
-        // 🔥 CHEAT CODE SEGURO: Desactivamos el cobro al fan (//)
-        // await prisma.user.update({ where: { id: userId }, data: { walletBalance: { decrement: tipAmount } } });
-        
-        // 1. Sumamos el dinero real a la cuenta del Creador
-        await prisma.user.update({ 
-          where: { id: stream.creatorId }, 
-          data: { walletBalance: { increment: tipAmount } } 
+        // 1. Sumamos el dinero a la cuenta del Creador (A su tabla Wallet separada)
+        await prisma.wallet.upsert({ 
+          where: { userId: stream.creatorId },
+          update: { balance: { increment: tipAmount } },
+          create: { userId: stream.creatorId, balance: tipAmount } 
         });
 
-        // 2. Creamos el recibo MÁS BÁSICO para evitar que Prisma lo rechace
+        // 2. Calculamos las comisiones (Obligatorias en tu schema)
+        const platformFeePercent = 20; // O el porcentaje que manejes
+        const feeAmount = (tipAmount * platformFeePercent) / 100;
+        const netToCreator = tipAmount - feeAmount;
+
+        // 3. Creamos el recibo MÁS SEGURO
         await prisma.transaction.create({
           data: {
             senderId: userId,
             receiverId: stream.creatorId,
             amount: tipAmount,
-            type: 'TIP', // Volvemos a TIP que es el estándar
+            platformFee: feeAmount, // Tu schema lo exige
+            netAmount: netToCreator, // Tu schema lo exige
+            type: 'TIP', // Tu schema SÍ tiene la palabra TIP
             status: 'COMPLETED'
           }
         });
-        console.log(`💰 ÉXITO: $${tipAmount} USD sumados al creador ${stream.creatorId}`);
+        console.log(`💰 ÉXITO: $${tipAmount} USD sumados a la Wallet de ${stream.creatorId}`);
       } catch (moneyError) {
-        // Si la base de datos se queja, lo imprimimos en Coolify pero NO rompemos el chat
-        console.error('🚨 ERROR FINANCIERO (Revisa tu Schema de Prisma):', moneyError.message);
+        console.error('🚨 ERROR FINANCIERO:', moneyError.message);
       }
     }
 
