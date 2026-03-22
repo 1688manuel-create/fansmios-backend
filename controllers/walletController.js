@@ -83,27 +83,29 @@ exports.getTransactionHistory = async (req, res) => {
 exports.requestWithdrawal = async (req, res) => {
   try {
     const creatorId = req.user.userId;
-    const { amount, isExpress, twoFactorToken } = req.body; 
+    let { amount, isExpress, twoFactorToken } = req.body; 
+
+    // 🔥 PARCHE DE SEGURIDAD: Convertir a booleano real para evitar cobros erróneos
+    isExpress = isExpress === true || isExpress === 'true';
 
     const user = await prisma.user.findUnique({ where: { id: creatorId } });
 
-    // 🛑 MODO PRUEBA LOCAL: Hemos desactivado temporalmente el Escudo 2FA y KYC 
-    // para que puedas probar el flujo. (En producción descomentaremos esto).
+    // 🛡️ ESCUDO DE PRODUCCIÓN: Validación estricta de 2FA y KYC
+    if (!user.twoFactorEnabled || !user.twoFactorSecret) {
+      return res.status(403).json({ error: '⚠️ Seguridad Requerida: Debes activar el 2FA en tu perfil para retirar fondos.' });
+    }
     
-    /* if (!user.twoFactorEnabled || !user.twoFactorSecret) {
-      return res.status(403).json({ error: '⚠️ Seguridad Requerida: Debes activar el 2FA.' });
-    }
     if (!twoFactorToken) {
-      return res.status(400).json({ error: 'Debes ingresar tu código de 6 dígitos.' });
+      return res.status(400).json({ error: 'Debes ingresar tu código de 6 dígitos de Google Authenticator.' });
     }
+    
     const isVerified = speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: twoFactorToken, window: 1 });
-    if (!isVerified) return res.status(401).json({ error: '❌ Código 2FA incorrecto.' });
+    if (!isVerified) return res.status(401).json({ error: '❌ Código 2FA incorrecto o expirado.' });
 
     const profile = await prisma.creatorProfile.findUnique({ where: { userId: creatorId } });
     if (!profile || profile.kycStatus !== 'APPROVED') {
-      return res.status(403).json({ error: '⚠️ Verificación Requerida: Debes aprobar tu KYC.' });
+      return res.status(403).json({ error: '⚠️ Verificación Requerida: Tu identidad (KYC) debe estar aprobada por un administrador.' });
     }
-    */
 
     const withdrawalAmount = parseFloat(amount);
     
