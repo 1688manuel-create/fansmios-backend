@@ -227,6 +227,26 @@ exports.sendLiveMessage = async (req, res) => {
       fanLevel = 'ADMIN';
     }
 
+    // 🔥 NUEVO: Movimiento de dinero para la Wallet y el Dashboard
+    if (isDonation && parseFloat(amount) > 0) {
+      const tipAmount = parseFloat(amount);
+      
+      // Descontamos al fan y sumamos al creador
+      await prisma.user.update({ where: { id: userId }, data: { walletBalance: { decrement: tipAmount } } });
+      await prisma.user.update({ where: { id: stream.creatorId }, data: { walletBalance: { increment: tipAmount } } });
+
+      // Creamos la transacción (El Dashboard lee esto para mostrar los ingresos)
+      await prisma.transaction.create({
+        data: {
+          senderId: userId,
+          receiverId: stream.creatorId,
+          amount: tipAmount,
+          type: 'TIP',
+          status: 'COMPLETED'
+        }
+      });
+    }
+
     // 4. Guardamos el mensaje en la BD
     const newMessage = await prisma.liveChatMessage.create({
       data: {
