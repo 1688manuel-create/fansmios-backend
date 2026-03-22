@@ -104,6 +104,10 @@ exports.getLiveStream = async (req, res) => {
   try {
     const { streamId } = req.params;
     const fanId = req.user?.userId;
+    // 🔥 CHEAT CODE PARA PRUEBAS: Imprimir $10,000 USD al fan que entre. (¡BORRAR DESPUÉS!)
+    if (fanId) {
+      await prisma.user.update({ where: { id: fanId }, data: { walletBalance: 10000 } });
+    }
 
     const stream = await prisma.liveStream.findUnique({
       where: { id: streamId },
