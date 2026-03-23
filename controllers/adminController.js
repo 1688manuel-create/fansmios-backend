@@ -68,8 +68,9 @@ exports.getReports = async (req, res) => {
     const reports = await prisma.report.findMany({
       where: { status: 'PENDING' },
       include: {
-        reporter: { select: { email: true } },
-        reportedUser: { select: { email: true } }
+        // 🔥 EL FIX: Ahora pedimos explícitamente el username además del email
+        reporter: { select: { email: true, username: true } },
+        reportedUser: { select: { email: true, username: true } }
       }
     });
 
