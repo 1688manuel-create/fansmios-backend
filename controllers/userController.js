@@ -21,7 +21,7 @@ exports.becomeCreator = async (req, res) => {
     await prisma.creatorProfile.create({
       data: {
         userId: userId,
-        bio: "¡Hola! Soy un nuevo creador en FansMios.",
+        bio: "¡Hola! Soy un nuevo creador en FansMio.",
         monthlyPrice: 5.00
       }
     });
@@ -82,11 +82,11 @@ exports.updateProfile = async (req, res) => {
     // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary
     if (req.files) {
       if (req.files.profileImage && req.files.profileImage.length > 0) {
-        const result = await cloudinary.uploader.upload(req.files.profileImage[0].path, { folder: "fansmios_profiles" });
+        const result = await cloudinary.uploader.upload(req.files.profileImage[0].path, { folder: "fansmio_profiles" });
         profileData.profileImage = result.secure_url;
       }
       if (req.files.coverImage && req.files.coverImage.length > 0) {
-        const result = await cloudinary.uploader.upload(req.files.coverImage[0].path, { folder: "fansmios_profiles" });
+        const result = await cloudinary.uploader.upload(req.files.coverImage[0].path, { folder: "fansmio_profiles" });
         profileData.coverImage = result.secure_url;
       }
     }

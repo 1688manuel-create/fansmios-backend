@@ -9,7 +9,7 @@ const probarCambioDeRol = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: "creador@fansmios.com", // El correo que registramos en el Módulo 1
+        email: "creador@fansmio.com", // El correo que registramos en el Módulo 1
         password: "PasswordSegura123!" // La contraseña que usamos
       })
     });

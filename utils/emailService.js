@@ -20,7 +20,7 @@ const transporter = nodemailer.createTransport({
 const sendEmail = async (to, subject, text) => {
   try {
     const mailOptions = {
-      from: `"FansMios Soporte" <${process.env.EMAIL_USER}>`,
+      from: `"FansMio Soporte" <${process.env.EMAIL_USER}>`,
       to: to,
       subject: subject,
       text: text,
@@ -57,7 +57,7 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #050505; color: #ffffff; border-radius: 15px; overflow: hidden; border: 1px solid #333;">
         <div style="background: linear-gradient(90deg, #6b21a8, #2563eb); padding: 20px; text-align: center;">
-          <h1 style="margin: 0; color: white; font-size: 24px;">FansMios 🌟</h1>
+          <h1 style="margin: 0; color: white; font-size: 24px;">FansMio 🌟</h1>
         </div>
         <div style="padding: 30px; background-color: #111;">
           <h2 style="color: #fff; margin-top: 0;">¡Tienes novedades!</h2>
@@ -74,7 +74,7 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
 
     // 4. Enviamos el correo bonito
     await transporter.sendMail({
-      from: `"FansMios Notificaciones" <${process.env.EMAIL_USER}>`,
+      from: `"FansMio Notificaciones" <${process.env.EMAIL_USER}>`,
       to: user.email,
       subject: subject,
       html: htmlTemplate,

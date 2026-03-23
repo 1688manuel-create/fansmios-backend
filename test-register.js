@@ -11,7 +11,7 @@ const probarLogin = async () => {
         'User-Agent': 'Mi iPhone 15 Pro Max' // Simulamos que entramos desde un iPhone
       },
       body: JSON.stringify({
-        email: "creador@fansmios.com", // El email que registramos antes
+        email: "creador@fansmio.com", // El email que registramos antes
         password: "PasswordSegura123!" // La contraseña que pusimos
       })
     });

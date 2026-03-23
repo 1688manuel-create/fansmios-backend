@@ -16,7 +16,7 @@ exports.getMyReferralInfo = async (req, res) => {
 
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-    // En producción, cambiarás "localhost:3000" por tu dominio real (Ej: fansmios.com)
+    // En producción, cambiarás "localhost:3000" por tu dominio real (Ej: fansmio.com)
     const referralLink = `http://localhost:3000/register?ref=${user.referralCode}`;
 
     res.status(200).json({ 
