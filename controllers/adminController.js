@@ -7,21 +7,27 @@ const prisma = new PrismaClient();
 // ==========================================
 exports.changeUserStatus = async (req, res) => {
   try {
-    const { targetUserId, newStatus, adminNotes } = req.body;
+    // 🔥 BLINDAJE: Aceptamos ambos formatos de variables (del Frontend o Postman)
+    const targetId = req.body.targetUserId || req.body.userId || req.body.id;
+    const statusToApply = req.body.newStatus || req.body.status;
+    const notes = req.body.adminNotes || req.body.reason;
 
-    // 🔥 BLINDAJE NINJA: Añadimos 'SHADOWBANNED' a los estados legales permitidos
+    if (!targetId || !statusToApply) {
+      return res.status(400).json({ error: 'Faltan datos obligatorios (userId o status).' });
+    }
+
     const validStatuses = ['ACTIVE', 'SUSPENDED', 'BANNED', 'SHADOWBANNED'];
-    if (!validStatuses.includes(newStatus)) {
+    if (!validStatuses.includes(statusToApply)) {
       return res.status(400).json({ error: 'Estado inválido. Usa: ACTIVE, SUSPENDED, BANNED o SHADOWBANNED.' });
     }
 
     const updatedUser = await prisma.user.update({
-      where: { id: targetUserId },
-      data: { status: newStatus, adminNotes: adminNotes || null }
+      where: { id: targetId },
+      data: { status: statusToApply, adminNotes: notes || null }
     });
 
     res.status(200).json({ 
-      message: `El estado del usuario ahora es: ${newStatus} 🥷`, 
+      message: `El estado del usuario ahora es: ${statusToApply} 🥷`, 
       user: { email: updatedUser.email, status: updatedUser.status } 
     });
   } catch (error) {
@@ -79,7 +85,9 @@ exports.getReports = async (req, res) => {
 // ==========================================
 exports.resolveReport = async (req, res) => {
   try {
-    const { reportId, newStatus, adminMessage } = req.body; 
+    const reportId = req.body.reportId || req.body.id;
+    const newStatus = req.body.newStatus || req.body.status;
+    const adminMessage = req.body.adminMessage || req.body.message || ''; 
 
     if (newStatus !== 'RESOLVED' && newStatus !== 'DISMISSED') {
       return res.status(400).json({ error: 'Estado inválido. Usa RESOLVED o DISMISSED.' });
@@ -97,7 +105,9 @@ exports.resolveReport = async (req, res) => {
       data: { status: newStatus }
     });
 
-    const tituloReporte = report.reason.split(' | ')[0]; 
+    // Prevención de crash si el reason viene vacío
+    const reasonText = report.reason || 'Reporte de moderación';
+    const tituloReporte = reasonText.split(' | '); 
     const estadoTexto = newStatus === 'RESOLVED' ? 'Resuelto ✅' : 'Descartado ❌';
     let mensajeNotificacion = `Tu reporte sobre "${tituloReporte}" ha sido ${estadoTexto}.`;
     
@@ -131,33 +141,45 @@ exports.resolveReport = async (req, res) => {
 // ==========================================
 exports.handleWithdrawal = async (req, res) => {
   try {
-    const { withdrawalId, newStatus, adminNotes } = req.body; 
+    // 🔥 BLINDAJE: Aceptamos ambos formatos de variables
+    const wId = req.body.withdrawalId || req.body.id; 
+    const statusToApply = req.body.newStatus || req.body.status;
+    const notes = req.body.adminNotes || req.body.reason || '';
+
+    if (!wId || !statusToApply) {
+      return res.status(400).json({ error: 'Faltan datos obligatorios (id del retiro o status).' });
+    }
 
     const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'PAID'];
-    if (!validStatuses.includes(newStatus)) return res.status(400).json({ error: 'Estado de retiro inválido.' });
+    if (!validStatuses.includes(statusToApply)) return res.status(400).json({ error: 'Estado de retiro inválido.' });
 
-    const withdrawal = await prisma.withdrawal.findUnique({ where: { id: withdrawalId } });
+    const withdrawal = await prisma.withdrawal.findUnique({ where: { id: wId } });
     if (!withdrawal) return res.status(404).json({ error: 'Retiro no encontrado.' });
     
     if (withdrawal.status !== 'PENDING' && withdrawal.status !== 'APPROVED') {
       return res.status(400).json({ error: 'Este retiro ya fue procesado previamente.' });
     }
 
+    // Determinamos el ID del creador sin importar cómo esté en la tabla
+    const creatorId = withdrawal.creatorId || withdrawal.userId;
+
     await prisma.$transaction(async (tx) => {
+      // 1. Actualizamos el estado del retiro
       await tx.withdrawal.update({
-        where: { id: withdrawalId },
-        data: { status: newStatus, adminNotes: adminNotes || null }
+        where: { id: wId },
+        data: { status: statusToApply, adminNotes: notes || null }
       });
 
-      if (newStatus === 'REJECTED') {
+      // 2. Si rechazamos, DEVOLVEMOS el dinero a la billetera del creador
+      if (statusToApply === 'REJECTED') {
         await tx.wallet.update({
-          where: { userId: withdrawal.creatorId },
+          where: { userId: creatorId },
           data: { balance: { increment: withdrawal.amount } }
         });
       }
     });
 
-    res.status(200).json({ message: `Retiro actualizado a: ${newStatus} 💸` });
+    res.status(200).json({ message: `Retiro actualizado a: ${statusToApply} 💸` });
   } catch (error) {
     console.error('Error al manejar retiro:', error);
     res.status(500).json({ error: 'Error interno del servidor' });

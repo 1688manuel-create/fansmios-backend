@@ -27,7 +27,12 @@ exports.getPendingKyc = async (req, res) => {
 // ==========================================
 exports.approveKyc = async (req, res) => {
   try {
-    const { profileId } = req.params;
+    // 🔥 BLINDAJE: Aceptamos el ID tanto de params como del body (Modo Dios compatible)
+    const profileId = req.params.profileId || req.body.profileId || req.body.id;
+
+    if (!profileId) {
+      return res.status(400).json({ error: 'ID de expediente no proporcionado.' });
+    }
 
     const profile = await prisma.creatorProfile.findUnique({ where: { id: profileId } });
     if (!profile || profile.kycStatus !== 'PENDING') {
@@ -46,7 +51,7 @@ exports.approveKyc = async (req, res) => {
           userId: profile.userId,
           type: 'kyc_approved',
           content: `✅ ¡Felicidades! Tu Identidad Oficial ha sido verificada. Ya puedes realizar retiros.`,
-          link: '/dashboard/wallet'
+          link: '/dashboard/wallet' // Funciona perfecto en fansmio.com
         }
       });
     });
@@ -63,11 +68,16 @@ exports.approveKyc = async (req, res) => {
 // ==========================================
 exports.rejectKyc = async (req, res) => {
   try {
-    const { profileId } = req.params;
-    const { reason } = req.body; // Ej: "La foto del reverso está borrosa"
+    // 🔥 BLINDAJE: Aceptamos ID y Razón de múltiples fuentes
+    const profileId = req.params.profileId || req.body.profileId || req.body.id;
+    const rejectionReason = req.body.reason || req.body.adminNotes || req.body.message;
 
-    if (!reason) {
-      return res.status(400).json({ error: 'Debes proporcionar una razón legal para el rechazo.' });
+    if (!profileId) {
+      return res.status(400).json({ error: 'ID de expediente no proporcionado.' });
+    }
+
+    if (!rejectionReason) {
+      return res.status(400).json({ error: 'Debes proporcionar una razón clara para el rechazo.' });
     }
 
     const profile = await prisma.creatorProfile.findUnique({ where: { id: profileId } });
@@ -75,16 +85,13 @@ exports.rejectKyc = async (req, res) => {
       return res.status(400).json({ error: 'El expediente no existe o ya fue procesado.' });
     }
 
-    // 🔒 Transacción: Rechazamos, borramos las fotos malas y notificamos
+    // 🔒 Transacción: Rechazamos y notificamos
     await prisma.$transaction(async (tx) => {
       await tx.creatorProfile.update({
         where: { id: profileId },
         data: { 
           kycStatus: 'REJECTED', 
-          kycRejectionReason: reason,
-          // Opcional: Podrías poner en null las URLs para forzarlos a subir nuevas
-          // idDocumentUrl: null, 
-          // idSelfieUrl: null
+          kycRejectionReason: rejectionReason
         }
       });
 
@@ -92,13 +99,13 @@ exports.rejectKyc = async (req, res) => {
         data: {
           userId: profile.userId,
           type: 'kyc_rejected',
-          content: `❌ Tu verificación de identidad falló. Razón: ${reason}. Por favor, vuelve a intentarlo.`,
-          link: '/dashboard/kyc'
+          content: `❌ Tu verificación de identidad falló. Razón: ${rejectionReason}. Por favor, vuelve a intentarlo.`,
+          link: '/dashboard/kyc' // Funciona perfecto en fansmio.com
         }
       });
     });
 
-    res.status(200).json({ message: 'Expediente rechazado por fraude o baja calidad. 🛡️' });
+    res.status(200).json({ message: 'Expediente rechazado. El usuario ha sido notificado. 🛡️' });
   } catch (error) {
     console.error("Error al rechazar KYC:", error);
     res.status(500).json({ error: "Error interno al rechazar el KYC." });

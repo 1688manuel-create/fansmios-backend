@@ -37,18 +37,16 @@ exports.getPendingWithdrawals = async (req, res) => {
 
 // ==========================================
 // ✅ 2. APROBAR RETIRO (Validación Manual de PayRam)
-// El admin envía el dinero por Binance y pega el Hash aquí.
 // ==========================================
 exports.approveWithdrawal = async (req, res) => {
   try {
-    const { withdrawalId } = req.params;
-    const { txHash, adminNotes } = req.body; 
+    // 🛡️ BLINDAJE: Aceptamos el ID tanto de params como del body (Compatible con Modo Dios)
+    const withdrawalId = req.params.withdrawalId || req.body.withdrawalId || req.body.id;
+    const txHash = req.body.txHash || 'PAGO_MANUAL_ADMIN'; // Hash opcional para agilidad
+    const adminNotes = req.body.adminNotes || req.body.reason || 'Pago verificado y enviado vía PayRam (Manual).';
 
-    // En el MVP de PayRam, el Hash es obligatorio para dar fe del pago
-    if (!txHash) {
-      return res.status(400).json({ 
-        error: 'Debes ingresar el TX Hash de la transferencia (Binance/Blockchain) para aprobar el retiro.' 
-      });
+    if (!withdrawalId) {
+      return res.status(400).json({ error: 'ID de retiro no proporcionado.' });
     }
 
     const withdrawal = await prisma.withdrawal.findUnique({ 
@@ -69,7 +67,7 @@ exports.approveWithdrawal = async (req, res) => {
         data: { 
           status: 'PAID', 
           txHash: txHash, 
-          adminNotes: adminNotes || 'Pago verificado y enviado vía PayRam (Manual).' 
+          adminNotes: adminNotes 
         }
       });
 
@@ -92,7 +90,7 @@ exports.approveWithdrawal = async (req, res) => {
         data: {
           userId: withdrawal.creatorId,
           type: 'payout_approved',
-          content: `✅ ¡Pago enviado! Tu retiro de $${withdrawal.amount} USD ha sido procesado. Hash: ${txHash.substring(0, 10)}...`,
+          content: `✅ ¡Pago enviado! Tu retiro de $${withdrawal.amount} USD ha sido procesado.`,
           link: '/dashboard/wallet'
         }
       });
@@ -111,11 +109,12 @@ exports.approveWithdrawal = async (req, res) => {
 // ==========================================
 exports.rejectWithdrawal = async (req, res) => {
   try {
-    const { withdrawalId } = req.params;
-    const { adminNotes } = req.body; 
+    // 🛡️ BLINDAJE: Aceptamos el ID tanto de params como del body
+    const withdrawalId = req.params.withdrawalId || req.body.withdrawalId || req.body.id;
+    const adminNotes = req.body.adminNotes || req.body.reason || 'Retiro rechazado por el administrador.';
 
-    if (!adminNotes) {
-      return res.status(400).json({ error: 'Debes proporcionar una razón para rechazar el retiro.' });
+    if (!withdrawalId) {
+      return res.status(400).json({ error: 'ID de retiro no proporcionado.' });
     }
 
     const withdrawal = await prisma.withdrawal.findUnique({ 
@@ -133,7 +132,7 @@ exports.rejectWithdrawal = async (req, res) => {
         data: { status: 'REJECTED', adminNotes }
       });
 
-      // 2. PayRam devuelve el dinero a la billetera balance del creador
+      // 2. PayRam devuelve el dinero a la billetera (balance) del creador
       await tx.wallet.update({
         where: { userId: withdrawal.creatorId },
         data: { balance: { increment: withdrawal.amount } }
