@@ -43,7 +43,7 @@ exports.buyBoost = async (req, res) => {
           amount: price,
           platformFee: 0,
           netAmount: price,
-          attachedMessage: `Compra de Fansmios Boost: ${promoType}`
+          attachedMessage: `Compra de Fansmio Boost: ${promoType}`
         }
       });
 

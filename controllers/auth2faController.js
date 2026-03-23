@@ -18,7 +18,7 @@ exports.generate2FA = async (req, res) => {
 
     // 1. Generamos un secreto criptográfico único para este usuario
     const secret = speakeasy.generateSecret({ 
-      name: `Fansmios (${user.username || user.email})` 
+      name: `Fansmio (${user.username || user.email})` 
     });
 
     // 2. Guardamos el secreto en la BD (aún sin activar)

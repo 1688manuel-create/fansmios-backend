@@ -82,7 +82,7 @@ exports.register = async (req, res) => {
     const verifyLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
     await sendEmail(
       newUser.email, 
-      'Verifica tu correo en FansMios 🔐', 
+      'Verifica tu correo en FansMio 🔐', 
       `¡Hola @${newUser.username}!\n\nEstás a un paso de entrar al imperio. Por favor, verifica tu correo haciendo clic en el siguiente enlace (es válido por 24 horas):\n\n${verifyLink}\n\nSi tú no creaste esta cuenta, ignora este mensaje.`
     );
 
@@ -195,7 +195,7 @@ exports.forgotPassword = async (req, res) => {
     const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
     const emailText = `Hola ${user.username || 'Usuario'},\n\nHaz clic en el siguiente enlace para recuperar tu contraseña. Este enlace expira en 15 minutos:\n\n${resetLink}\n\nSi no solicitaste esto, ignora este mensaje.`;
 
-    await sendEmail(user.email, 'Recuperación de Contraseña - FansMios', emailText);
+    await sendEmail(user.email, 'Recuperación de Contraseña - FansMio', emailText);
     res.status(200).json({ message: 'Si el correo existe, se ha enviado un enlace de recuperación.' });
   } catch (error) { res.status(500).json({ error: 'Error interno del servidor' }); }
 };
@@ -220,7 +220,7 @@ exports.generate2FA = async (req, res) => {
 
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    const secret = speakeasy.generateSecret({ name: `FansMios (${user.email})` });
+    const secret = speakeasy.generateSecret({ name: `FansMio (${user.email})` });
     await prisma.user.update({ where: { email }, data: { twoFactorSecret: secret.base32 } });
     const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
 
@@ -301,7 +301,7 @@ exports.resendVerificationEmail = async (req, res) => {
     const verifyLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
     await sendEmail(
       user.email, 
-      'Nuevo enlace de verificación - FansMios 🔐', 
+      'Nuevo enlace de verificación - FansMio 🔐', 
       `¡Hola @${user.username}!\n\nAquí tienes un nuevo enlace para verificar tu cuenta:\n\n${verifyLink}\n\nEs válido por 24 horas.`
     );
 

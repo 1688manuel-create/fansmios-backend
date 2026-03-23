@@ -16,18 +16,18 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     // Valores por defecto para posts normales
-    let folderName = 'fansmios_uploads';
+    let folderName = 'fansmio_uploads';
     let transformations = [];
 
     // 🔥 MAGIA: Si detecta que están subiendo un Avatar
     if (file.fieldname === 'profileImage') {
-      folderName = 'fansmios_avatares';
+      folderName = 'fansmio_avatares';
       // Cuadrado perfecto (400x400), detecta la cara y recorta alrededor de ella
       transformations = [{ width: 400, height: 400, crop: 'fill', gravity: 'face', quality: 'auto' }];
     } 
     // 🔥 MAGIA: Si detecta que están subiendo una Portada
     else if (file.fieldname === 'coverImage') {
-      folderName = 'fansmios_portadas';
+      folderName = 'fansmio_portadas';
       // Rectángulo panorámico (1920x1080), centrado
       transformations = [{ width: 1920, height: 1080, crop: 'fill', gravity: 'center', quality: 'auto' }];
     }

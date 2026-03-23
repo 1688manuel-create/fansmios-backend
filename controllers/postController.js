@@ -78,7 +78,7 @@ exports.createPost = async (req, res) => {
             if (req.file && req.file.filename) {
               await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("No se pudo borrar de nube"));
             }
-            return res.status(403).json({ error: `Imagen IA Detectada (${probability}%). Fansmios solo permite contenido real. 🤖🚫` });
+            return res.status(403).json({ error: `Imagen IA Detectada (${probability}%). Fansmio solo permite contenido real. 🤖🚫` });
           }
         } catch (apiError) { 
           console.error("⚠️ Error conectando con Sightengine:", apiError.response?.data || apiError.message); 
@@ -328,7 +328,7 @@ exports.deletePost = async (req, res) => {
     if (post.mediaUrl && post.mediaUrl.includes('cloudinary.com')) {
       const parts = post.mediaUrl.split('/');
       const filenameWithExt = parts[parts.length - 1];
-      const publicId = 'fansmios_uploads/' + filenameWithExt.split('.')[0]; 
+      const publicId = 'fansmio_uploads/' + filenameWithExt.split('.')[0]; 
       await cloudinary.uploader.destroy(publicId).catch(() => console.log("No se pudo borrar de Cloudinary"));
     } else if (post.mediaUrl) {
       const fileName = post.mediaUrl.replace('/uploads/', '');
