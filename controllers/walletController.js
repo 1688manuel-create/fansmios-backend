@@ -3,7 +3,6 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const speakeasy = require('speakeasy'); 
 
-// 🔥 NUEVA FUNCIÓN: Obtener billetera básica
 exports.getWallet = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -20,9 +19,6 @@ exports.getWallet = async (req, res) => {
   }
 };
 
-// ==========================================
-// 1. VER EL BALANCE DEL CREADOR
-// ==========================================
 exports.getWalletBalance = async (req, res) => {
   try {
     const creatorId = req.user.userId;
@@ -51,9 +47,6 @@ exports.getWalletBalance = async (req, res) => {
   }
 };
 
-// ==========================================
-// 2. VER EL HISTORIAL DE TRANSACCIONES (Ventas)
-// ==========================================
 exports.getTransactionHistory = async (req, res) => {
   try {
     const creatorId = req.user.userId;
@@ -77,20 +70,16 @@ exports.getTransactionHistory = async (req, res) => {
   }
 };
 
-// ==========================================
-// 🔥 3. SOLICITAR UN RETIRO 
-// ==========================================
+// 🔥 3. SOLICITAR UN RETIRO (CORREGIDA CONTABILIDAD)
 exports.requestWithdrawal = async (req, res) => {
   try {
     const creatorId = req.user.userId;
     let { amount, isExpress, twoFactorToken } = req.body; 
 
-    // 🔥 PARCHE DE SEGURIDAD: Convertir a booleano real para evitar cobros erróneos
     isExpress = isExpress === true || isExpress === 'true';
 
     const user = await prisma.user.findUnique({ where: { id: creatorId } });
 
-    // 🛡️ ESCUDO DE PRODUCCIÓN: Validación estricta de 2FA y KYC
     if (!user.twoFactorEnabled || !user.twoFactorSecret) {
       return res.status(403).json({ error: '⚠️ Seguridad Requerida: Debes activar el 2FA en tu perfil para retirar fondos.' });
     }
@@ -109,12 +98,10 @@ exports.requestWithdrawal = async (req, res) => {
 
     const withdrawalAmount = parseFloat(amount);
     
-    // 🛑 REGLA 1: Monto Mínimo de Retiro ($50)
     if (!withdrawalAmount || withdrawalAmount < 50) {
       return res.status(400).json({ error: 'El monto mínimo de retiro es de $50.00 USD.' });
     }
 
-    // 🛑 REGLA 2: Frecuencia (Solo si NO es Exprés)
     if (!isExpress) {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
@@ -133,28 +120,28 @@ exports.requestWithdrawal = async (req, res) => {
 
     const wallet = await prisma.wallet.findUnique({ where: { userId: creatorId } });
 
-    // 🛑 REGLA 3: Billetera Cripto (USDT)
     if (!wallet?.cryptoAddress || wallet.cryptoAddress.length < 10) {
       return res.status(400).json({ error: 'Configura tu Billetera USDT (TRC20) antes de solicitar un retiro.' });
     }
 
-    // 🛑 REGLA 4: Fondos Suficientes
     if (!wallet || wallet.balance < withdrawalAmount) {
       return res.status(400).json({ error: 'No tienes saldo disponible suficiente.' });
     }
 
-    // 💰 REGLA 5: EL NEGOCIO (2% Normal vs 5% Exprés)
     const feePercent = isExpress ? 0.05 : 0.02;
     const feeAmount = withdrawalAmount * feePercent;
     const netAmount = withdrawalAmount - feeAmount;
     
     const typeLabel = isExpress ? '⚡ RETIRO EXPRÉS' : '🐢 RETIRO ESTÁNDAR';
 
-    // 🔒 FLUJO SEGURO (Transacción ACID)
+    // 🔒 FLUJO SEGURO (Mueve de balance a pendingBalance)
     const withdrawal = await prisma.$transaction(async (tx) => {
       await tx.wallet.update({
         where: { userId: creatorId },
-        data: { balance: { decrement: withdrawalAmount } }
+        data: { 
+          balance: { decrement: withdrawalAmount },
+          pendingBalance: { increment: withdrawalAmount } // 🔥 EL FIX VITAL
+        }
       });
 
       return await tx.withdrawal.create({
@@ -179,32 +166,22 @@ exports.requestWithdrawal = async (req, res) => {
   }
 };
 
-// ==========================================
-// 4. VER HISTORIAL DE RETIROS (Creador)
-// ==========================================
 exports.getWithdrawalHistory = async (req, res) => {
   try {
     const creatorId = req.user.userId;
-
     const withdrawals = await prisma.withdrawal.findMany({
       where: { creatorId: creatorId },
       orderBy: { createdAt: 'desc' }
     });
-
     res.status(200).json({ message: 'Tu historial de retiros 💸', withdrawals });
   } catch (error) {
-    console.error('Error al obtener historial de retiros:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
 
-// ==========================================
-// 5. DASHBOARD DE BILLETERA MAESTRO
-// ==========================================
 exports.getWalletDashboard = async (req, res) => {
   try {
     const userId = req.user.userId;
-
     let wallet = await prisma.wallet.findUnique({ where: { userId } });
     if (!wallet) {
       wallet = await prisma.wallet.create({ data: { userId, balance: 0, pendingBalance: 0 } });
@@ -235,14 +212,10 @@ exports.getWalletDashboard = async (req, res) => {
       totalEarnedHistorial: totalEarnings._sum.netAmount || 0
     });
   } catch (error) {
-    console.error('Error al cargar la billetera:', error);
     res.status(500).json({ error: 'Error interno al cargar los datos financieros.' });
   }
 };
 
-// ==========================================
-// 6. ACTUALIZAR DIRECCIÓN CRIPTO (USDT TRC20)
-// ==========================================
 exports.updateCryptoAddress = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -252,25 +225,14 @@ exports.updateCryptoAddress = async (req, res) => {
       return res.status(400).json({ error: 'La dirección cripto no es válida.' });
     }
 
-    // Buscamos o creamos la billetera del usuario
     const wallet = await prisma.wallet.upsert({
       where: { userId: userId },
-      update: { 
-        cryptoAddress: cryptoAddress,
-        cryptoNetwork: cryptoNetwork || 'TRC20'
-      },
-      create: {
-        userId: userId,
-        balance: 0,
-        pendingBalance: 0,
-        cryptoAddress: cryptoAddress,
-        cryptoNetwork: cryptoNetwork || 'TRC20'
-      }
+      update: { cryptoAddress: cryptoAddress, cryptoNetwork: cryptoNetwork || 'TRC20' },
+      create: { userId: userId, balance: 0, pendingBalance: 0, cryptoAddress: cryptoAddress, cryptoNetwork: cryptoNetwork || 'TRC20' }
     });
 
     res.status(200).json({ message: 'Billetera Cripto actualizada con éxito.', wallet });
   } catch (error) {
-    console.error('Error al actualizar billetera cripto:', error);
     res.status(500).json({ error: 'Error interno al guardar la dirección.' });
   }
 };
