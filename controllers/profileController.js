@@ -74,13 +74,13 @@ exports.updateProfile = async (req, res) => {
 };
 
 // ==========================================
-// 3. OBTENER EL PERFIL PÚBLICO DEL CREADOR (Con Geo-Bloqueo 🌍🚫)
+// 3. OBTENER EL PERFIL PÚBLICO DEL CREADOR/ADMIN (Con Geo-Bloqueo 🌍🚫)
 // ==========================================
 exports.getPublicProfile = async (req, res) => {
   try {
     const { username } = req.params; 
     
-    // Traemos al creador y su configuración
+    // Traemos al usuario y su configuración
     const user = await prisma.user.findUnique({
       where: { username: username.toLowerCase() },
       select: {
@@ -94,14 +94,15 @@ exports.getPublicProfile = async (req, res) => {
       }
     });
 
-    if (!user || user.role !== 'CREATOR') {
-      return res.status(404).json({ error: 'Creador no encontrado' });
+    // 🔥 EL BYPASS: Ahora permitimos que pasen tanto CREATOR como ADMIN
+    if (!user || (user.role !== 'CREATOR' && user.role !== 'ADMIN')) {
+      return res.status(404).json({ error: 'Perfil no encontrado' });
     }
 
     // 🌍 INICIO DEL ESCUDO DE FRONTERA (GEO-BLOCKING)
     if (user.creatorProfile && user.creatorProfile.blockedCountries) {
       // Obtenemos la IP real del visitante
-      const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress;
+      const clientIp = (req.headers['x-forwarded-for'] || '').split(',').trim() || req.socket.remoteAddress;
       
       // Consultamos el país de esa IP
       const geo = geoip.lookup(clientIp);
@@ -109,7 +110,7 @@ exports.getPublicProfile = async (req, res) => {
       
       console.log(`📡 Visitante intentando entrar a @${username} | IP: ${clientIp} | País: ${visitorCountry || 'Local/Desconocido'}`);
 
-      // Si detectamos de qué país viene, comparamos con la lista negra del creador
+      // Si detectamos de qué país viene, comparamos con la lista negra
       if (visitorCountry) {
         // Transformamos "MX, CO, AR" en un array limpio ['MX', 'CO', 'AR']
         const blockedList = user.creatorProfile.blockedCountries
@@ -117,9 +118,9 @@ exports.getPublicProfile = async (req, res) => {
           .map(country => country.trim().toUpperCase());
 
         if (blockedList.includes(visitorCountry)) {
-          console.log(`🛑 Acceso bloqueado. El creador bloqueó: ${visitorCountry}`);
+          console.log(`🛑 Acceso bloqueado. El usuario bloqueó: ${visitorCountry}`);
           return res.status(403).json({ 
-            error: '🚫 Este perfil no está disponible en tu región por decisión del creador.' 
+            error: '🚫 Este perfil no está disponible en tu región.' 
           });
         }
       }
