@@ -1,6 +1,7 @@
 // backend/routes/settingsRoutes.js
 const express = require('express');
 const router = express.Router();
+const settingsController = require('../controllers/settingsController'); // 🔥 ESTA ES LA LÍNEA QUE FALTABA
 
 const { verifyToken, isCreator } = require('../middlewares/authMiddleware');
 
