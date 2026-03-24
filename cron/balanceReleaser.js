@@ -5,16 +5,16 @@ const prisma = new PrismaClient();
 
 /**
  * 🤖 EL ROBOT DEL BANCO (Custodial Balance System)
- * Objetivo: Mover el dinero de 'Pendiente' a 'Disponible' exactamente 48 horas después del pago.
+ * Objetivo: Mover el dinero... exactamente 7 días después del pago.
  */
 const startBalanceReleaser = () => {
   // Se ejecuta cada hora, en el minuto 0 (Ej: 1:00, 2:00, 3:00...)
   cron.schedule('0 * * * *', async () => {
-    console.log('🏦 [CRON] Iniciando auditoría de liberación de fondos (48h)...');
+    console.log('🏦 [CRON] Iniciando auditoría de liberación de fondos (7 días)...');
 
     try {
-      // 1. Calculamos la fecha límite (hace exactamente 48 horas)
-      const fortyEightHoursAgo = new Date(Date.now() - (48 * 60 * 60 * 1000));
+      // 1. Calculamos la fecha límite (hace exactamente 7 días)
+      const sevenDaysAgo = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000));
 
       // 2. Buscamos todas las transacciones COMPLETADAS que aún no se han liberado
       // *Nota: Asegúrate de tener el campo `fundsReleased: Boolean @default(false)` en tu modelo Transaction.
@@ -23,7 +23,7 @@ const startBalanceReleaser = () => {
           status: 'COMPLETED',
           fundsReleased: false,       // Aún no liberado
           createdAt: {
-            lte: fortyEightHoursAgo   // Su última actualización fue hace 48h o más
+            lte: sevenDaysAgo   // Su última actualización fue hace 7 días o más
           }
         }
       });
