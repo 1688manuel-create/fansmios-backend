@@ -8,13 +8,12 @@ const prisma = new PrismaClient();
 exports.createBundle = async (req, res) => {
   try {
     const creatorId = req.user.userId;
-    const { title, description, price, postIds } = req.body; // postIds es un arreglo: ["id1", "id2"]
+    const { title, description, price, postIds } = req.body;
 
     if (!title || price === undefined || !postIds || postIds.length === 0) {
       return res.status(400).json({ error: 'Faltan datos. Un paquete necesita título, precio y al menos un post.' });
     }
 
-    // 1. Verificamos que los posts realmente existan y le pertenezcan a este creador
     const posts = await prisma.post.findMany({
       where: {
         id: { in: postIds },
@@ -26,7 +25,6 @@ exports.createBundle = async (req, res) => {
       return res.status(400).json({ error: 'Algunos posts no existen o no te pertenecen.' });
     }
 
-    // 2. Creamos el Bundle en la base de datos y lo conectamos con los posts
     const newBundle = await prisma.bundle.create({
       data: {
         creatorId: creatorId,
@@ -34,7 +32,7 @@ exports.createBundle = async (req, res) => {
         description: description,
         price: parseFloat(price),
         posts: {
-          connect: postIds.map(id => ({ id })) // Sintaxis de Prisma para enlazar posts existentes
+          connect: postIds.map(id => ({ id }))
         }
       },
       include: { posts: true }
@@ -55,7 +53,6 @@ exports.purchaseBundle = async (req, res) => {
     const fanId = req.user.userId;
     const { bundleId } = req.body;
 
-    // 1. Buscamos el paquete y los posts que trae adentro
     const bundle = await prisma.bundle.findUnique({
       where: { id: bundleId },
       include: { posts: true }
@@ -64,33 +61,27 @@ exports.purchaseBundle = async (req, res) => {
     if (!bundle) return res.status(404).json({ error: 'Paquete no encontrado.' });
     if (bundle.creatorId === fanId) return res.status(400).json({ error: 'No puedes comprar tu propio paquete.' });
 
-    // 2. Verificamos que no lo haya comprado ya
     const existingPurchase = await prisma.bundlePurchase.findUnique({
       where: { fanId_bundleId: { fanId, bundleId } }
     });
     if (existingPurchase) return res.status(400).json({ error: 'Ya compraste este paquete.' });
 
-    // 3. Matemáticas Financieras
-    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } });
-    const feePercent = settings ? settings.platformFeePercent : 20.0;
+    const settings = await prisma.platformSettings.findFirst();
+    const feePercent = settings ? settings.feePPV : 20.0;
     
     const price = bundle.price;
     const platformFee = (price * feePercent) / 100;
     const netAmount = price - platformFee;
 
-    // 4. TRANSACCIÓN SEGURA (Magia de Desbloqueo en Masa)
     await prisma.$transaction(async (tx) => {
-      // a) Crear el recibo del paquete completo
       await tx.bundlePurchase.create({
         data: { fanId, bundleId, pricePaid: price }
       });
 
-      // b) 🪄 DESBLOQUEO EN MASA: Crear un recibo individual por cada post dentro del paquete.
-      // Usamos "skipDuplicates: true" por si el Fan ya había comprado uno de estos posts sueltos antes.
       const postPurchasesData = bundle.posts.map(post => ({
         fanId: fanId,
         postId: post.id,
-        pricePaid: 0 // Le ponemos 0 porque el precio ya se cobró en el paquete
+        pricePaid: 0 
       }));
 
       await tx.postPurchase.createMany({
@@ -98,7 +89,6 @@ exports.purchaseBundle = async (req, res) => {
         skipDuplicates: true 
       });
 
-      // c) Libro contable de la empresa
       await tx.transaction.create({
         data: {
           senderId: fanId,
@@ -112,7 +102,6 @@ exports.purchaseBundle = async (req, res) => {
         }
       });
 
-      // d) Pagarle al creador
       await tx.wallet.upsert({
         where: { userId: bundle.creatorId },
         update: { pendingBalance: { increment: netAmount } },
@@ -136,8 +125,8 @@ exports.getMyBundles = async (req, res) => {
     const bundles = await prisma.bundle.findMany({
       where: { creatorId: creatorId },
       include: { 
-        posts: { select: { id: true, mediaUrl: true, mediaType: true } }, // Traemos info visual de los posts
-        _count: { select: { purchases: true } } // Cuántas veces se ha vendido
+        posts: { select: { id: true, mediaUrl: true, mediaType: true } }, 
+        _count: { select: { purchases: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -154,7 +143,6 @@ exports.getMyBundles = async (req, res) => {
 exports.getEligiblePosts = async (req, res) => {
   try {
     const creatorId = req.user.userId;
-    // Solo traemos posts que sean PPV y que tengan alguna imagen/video
     const posts = await prisma.post.findMany({
       where: { userId: creatorId, isPPV: true, mediaUrl: { not: null } },
       orderBy: { createdAt: 'desc' },
@@ -168,7 +156,7 @@ exports.getEligiblePosts = async (req, res) => {
 };
 
 // ==========================================
-// 5. OBTENER PAQUETES DE UN CREADOR (Mostrador Público para Fans)
+// 🔥 5. OBTENER PAQUETES DE UN CREADOR (CORREGIDO PARA MOSTRAR "ADQUIRIDO")
 // ==========================================
 exports.getCreatorBundles = async (req, res) => {
   try {
@@ -178,8 +166,7 @@ exports.getCreatorBundles = async (req, res) => {
     const creator = await prisma.user.findUnique({ where: { username } });
     if (!creator) return res.status(404).json({ error: 'Creador no encontrado' });
 
-    // Traemos todos los bundles y el contenido de sus posts
-    const bundles = await prisma.bundle.findMany({
+    const rawBundles = await prisma.bundle.findMany({
       where: { creatorId: creator.id },
       include: {
         posts: { select: { id: true, content: true, mediaUrl: true, mediaType: true } },
@@ -188,11 +175,22 @@ exports.getCreatorBundles = async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // Separamos los que ya compró de los que aún puede comprar
-    const availableBundles = bundles.filter(bundle => bundle.purchases.length === 0);
-    const purchasedBundles = bundles.filter(bundle => bundle.purchases.length > 0);
+    // ⚡ AHORA ENVIAMOS TODOS LOS PAQUETES, PERO MARCAMOS LOS QUE YA SE COMPRARON
+    const processedBundles = rawBundles.map(bundle => {
+      const hasPurchased = bundle.purchases.length > 0;
+      return {
+        ...bundle,
+        hasAccess: hasPurchased, // El Frontend lee esta variable para pintar el botón verde
+        purchases: undefined // Limpiamos esta data técnica por seguridad
+      };
+    });
 
-    res.status(200).json({ availableBundles, purchasedBundles });
+    // Mantenemos la estructura de respuesta para no romper tu Frontend
+    res.status(200).json({ 
+      availableBundles: processedBundles, 
+      purchasedBundles: [] 
+    });
+
   } catch (error) {
     console.error('Error al obtener paquetes del creador:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -202,10 +200,9 @@ exports.getCreatorBundles = async (req, res) => {
 // 🥈 NIVEL 2 DE PUBLICIDAD: EL BANNER AZUL (Solo Boost PRO)
 exports.getFeaturedBundle = async (req, res) => {
   try {
-    // 1. Buscamos quién pagó la renta del aparador (Paquete PRO)
     const activeProPromo = await prisma.promotion.findFirst({
       where: {
-        package: 'PRO', // 🔥 SOLO QUIEN PAGÓ EL NIVEL 2
+        package: 'PRO', 
         active: true,
         expiresAt: { gt: new Date() }
       },
@@ -216,7 +213,6 @@ exports.getFeaturedBundle = async (req, res) => {
        return res.status(200).json({ bundle: null });
     }
 
-    // 2. Si alguien sí pagó, buscamos su paquete (Bundle)
     const bundle = await prisma.bundle.findFirst({
       where: { creatorId: activeProPromo.creatorId },
       orderBy: { createdAt: 'desc' },
@@ -226,7 +222,6 @@ exports.getFeaturedBundle = async (req, res) => {
             id: true, 
             username: true, 
             name: true,
-            // 🔥 ESTA ES LA LÍNEA MÁGICA QUE FALTABA PARA TRAER LA FOTO:
             creatorProfile: { select: { profileImage: true } } 
           } 
         },
@@ -247,7 +242,6 @@ exports.deleteBundle = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.userId;
 
-    // Verificamos que el paquete exista y pertenezca a este creador
     const bundle = await prisma.bundle.findFirst({
       where: { id, creatorId: userId }
     });
@@ -256,7 +250,6 @@ exports.deleteBundle = async (req, res) => {
       return res.status(404).json({ error: 'Paquete no encontrado o no autorizado' });
     }
 
-    // Lo eliminamos de la base de datos
     await prisma.bundle.delete({
       where: { id }
     });
