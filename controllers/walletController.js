@@ -128,7 +128,10 @@ exports.requestWithdrawal = async (req, res) => {
       return res.status(400).json({ error: 'No tienes saldo disponible suficiente.' });
     }
 
-    const feePercent = isExpress ? 0.05 : 0.02;
+    // 👑 CONSULTAR COMISIONES DE RETIRO (MODO DIOS)
+    const settings = await prisma.platformSettings.findFirst() || { feeWithdrawalExp: 5, feeWithdrawalStd: 2 };
+    
+    const feePercent = isExpress ? (settings.feeWithdrawalExp / 100) : (settings.feeWithdrawalStd / 100);
     const feeAmount = withdrawalAmount * feePercent;
     const netAmount = withdrawalAmount - feeAmount;
     

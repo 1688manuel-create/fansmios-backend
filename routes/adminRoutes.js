@@ -5,6 +5,7 @@ const adminController = require('../controllers/adminController');
 const adminPayoutController = require('../controllers/adminPayoutController'); // 🔥 NUEVO CEREBRO DE PAGOS
 const adminKycController = require('../controllers/adminKycController'); // 🔥 NUEVO CEREBRO LEGAL
 const adminAnalyticsController = require('../controllers/adminAnalyticsController');
+const settingsController = require('../controllers/settingsController'); // 🔥 CEREBRO DE COMISIONES
 
 // 🛡️ Importamos a los guardias de seguridad (Solo el CEO pasa)
 const { verifyToken, isAdmin } = require('../middlewares/authMiddleware');
@@ -33,8 +34,11 @@ router.post('/kyc/:profileId/reject', verifyToken, isAdmin, adminKycController.r
 // ==========================================
 // Acciones ejecutivas
 router.put('/user-status', verifyToken, isAdmin, adminController.changeUserStatus);
-router.put('/platform-fee', verifyToken, isAdmin, adminController.updatePlatformFee);
 router.put('/reports/resolve', verifyToken, isAdmin, adminController.resolveReport);
+
+// 👑 RUTAS DEL MODO DIOS (Protegidas por los guardias del CEO)
+router.get('/platform-settings', verifyToken, isAdmin, settingsController.getPlatformSettings);
+router.put('/platform-settings', verifyToken, isAdmin, settingsController.updatePlatformSettings);
 
 // Obtención de datos y Listas
 router.get('/reports', verifyToken, isAdmin, adminController.getReports);

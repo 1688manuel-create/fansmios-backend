@@ -122,3 +122,50 @@ exports.getBillingHistory = async (req, res) => {
     res.status(500).json({ error: 'Error interno del servidor.' }); 
   }
 };
+
+// ==========================================
+// 👑 5. MODO DIOS: OBTENER COMISIONES GLOBALES (Solo Admin)
+// ==========================================
+exports.getPlatformSettings = async (req, res) => {
+  try {
+    let settings = await prisma.platformSettings.findFirst();
+    if (!settings) {
+      settings = await prisma.platformSettings.create({ data: {} }); // Crea los valores por defecto si no existen
+    }
+    res.status(200).json(settings);
+  } catch (error) {
+    console.error('Error al cargar configuraciones de plataforma:', error);
+    res.status(500).json({ error: 'Error al cargar configuraciones de la plataforma.' });
+  }
+};
+
+// ==========================================
+// 👑 6. MODO DIOS: ACTUALIZAR COMISIONES GLOBALES (Solo Admin)
+// ==========================================
+exports.updatePlatformSettings = async (req, res) => {
+  try {
+    const data = req.body;
+    let settings = await prisma.platformSettings.findFirst();
+
+    if (settings) {
+      settings = await prisma.platformSettings.update({
+        where: { id: settings.id },
+        data: {
+          feeSubscription: parseFloat(data.feeSubscription),
+          feePPV: parseFloat(data.feePPV),
+          feeTips: parseFloat(data.feeTips),
+          feeLive: parseFloat(data.feeLive),
+          feeWithdrawalStd: parseFloat(data.feeWithdrawalStd),
+          feeWithdrawalExp: parseFloat(data.feeWithdrawalExp),
+        }
+      });
+    } else {
+      settings = await prisma.platformSettings.create({ data });
+    }
+    
+    res.status(200).json({ message: '¡Comisiones de FansMio actualizadas con éxito! 👑', settings });
+  } catch (error) {
+    console.error('Error al actualizar comisiones de plataforma:', error);
+    res.status(500).json({ error: 'Error al actualizar las comisiones.' });
+  }
+};

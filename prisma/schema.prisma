@@ -562,3 +562,17 @@ model Coupon {
   currentUses     Int       @default(0)
   createdAt       DateTime  @default(now())
 }
+
+// ==========================================
+// ⚙️ MODO DIOS: CONFIGURACIÓN GLOBAL
+// ==========================================
+model PlatformSettings {
+  id                 String   @id @default(uuid())
+  feeSubscription    Float    @default(20.0) // 20% para suscripciones
+  feePPV             Float    @default(20.0) // 20% para posts/mensajes
+  feeTips            Float    @default(20.0) // 20% para propinas
+  feeLive            Float    @default(30.0) // 30% para transmisiones en vivo
+  feeWithdrawalStd   Float    @default(2.0)  // 2% por retiro normal
+  feeWithdrawalExp   Float    @default(5.0)  // 5% por retiro rápido
+  updatedAt          DateTime @updatedAt
+}

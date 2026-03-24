@@ -36,7 +36,20 @@ exports.createPaymentIntent = async (req, res) => {
 
     if (finalAmount < 0.50) finalAmount = 0.50;
 
-    let feePercent = (type === 'LIVE_TICKET' || type === 'PPV_LIVE') ? 0.30 : 0.20;
+    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL
+    const settings = await prisma.platformSettings.findFirst() || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20 };
+    
+    let feePercent = 0.20; // Default por seguridad
+    if (type === 'LIVE_TICKET' || type === 'PPV_LIVE') {
+      feePercent = settings.feeLive / 100;
+    } else if (type === 'SUBSCRIPTION') {
+      feePercent = settings.feeSubscription / 100;
+    } else if (type === 'TIP') {
+      feePercent = settings.feeTips / 100;
+    } else {
+      feePercent = settings.feePPV / 100; // Para POSTS, BUNDLES y MENSAJES
+    }
+
     const platformFee = finalAmount * feePercent; 
     const netAmount = finalAmount - platformFee;
     const payramReceiptId = `PAYRAM-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
