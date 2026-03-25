@@ -8,7 +8,8 @@ const prisma = new PrismaClient();
 exports.createReport = async (req, res) => {
   try {
     const reporterId = req.user.userId;
-    const { targetId, reportedUsername, type, reason, description } = req.body;
+    // 🔥 CORRECCIÓN: Agregamos 'reportedUserId' para que el backend lo reciba
+    const { targetId, reportedUserId, reportedUsername, type, reason, description } = req.body;
 
     let reportData = {
       reporterId,
@@ -19,8 +20,10 @@ exports.createReport = async (req, res) => {
     };
 
     // 🔥 EL BLINDAJE: Buscamos quién es el Acusado
-    let accusedUserId = null;
-    if (reportedUsername) {
+    let accusedUserId = reportedUserId || null; // 1. Primero usamos el ID si nos lo mandan directo
+
+    // 2. Si no mandaron ID, pero sí el nombre, lo buscamos en la base de datos
+    if (!accusedUserId && reportedUsername) {
       const accused = await prisma.user.findUnique({ where: { username: reportedUsername } });
       if (accused) accusedUserId = accused.id;
     }
