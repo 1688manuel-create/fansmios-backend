@@ -85,7 +85,8 @@ exports.getConversation = async (req, res) => {
       if (!msg.isPPV || isSender || isUnlocked) {
         return { ...msg, senderId: isSender ? 'me' : msg.senderId, isUnlocked: true };
       } else {
-        return { ...msg, senderId: msg.senderId, mediaUrl: null, isUnlocked: false };
+        // Mantenemos el mediaUrl intacto para que el Frontend pueda aplicarle el filtro borroso
+        return { ...msg, senderId: msg.senderId, mediaUrl: msg.mediaUrl, isUnlocked: false };
       }
     });
 
