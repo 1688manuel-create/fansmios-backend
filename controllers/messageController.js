@@ -2,7 +2,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// Intentamos cargar el socketHandler para las notificaciones en vivo
 let socketHandler;
 try {
   socketHandler = require('../utils/socketHandler');
@@ -26,7 +25,7 @@ exports.getConversations = async (req, res) => {
 
     const formattedChats = conversations.map(chat => {
       const otherUser = chat.creatorId === userId ? chat.fan : chat.creator;
-      const lastMessage = chat.messages[0];
+      const lastMessage = chat.messages;
       const isUnread = lastMessage ? (lastMessage.receiverId === userId && !lastMessage.isRead) : false;
 
       return {
@@ -97,7 +96,7 @@ exports.getConversation = async (req, res) => {
 };
 
 // ==========================================
-// 2. ENVIAR MENSAJE E INYECTAR NOTIFICACIÓN 🔔
+// 2. ENVIAR MENSAJE E INYECTAR NOTIFICACIÓN
 // ==========================================
 exports.sendMessage = async (req, res) => {
   try {
@@ -149,18 +148,16 @@ exports.sendMessage = async (req, res) => {
       data: { updatedAt: new Date() }
     });
 
-    // 🔥 BUSCAMOS AL REMITENTE PARA SABER SU NOMBRE
     const senderInfo = await prisma.user.findUnique({
       where: { id: senderId }, select: { username: true }
     });
 
-    // 🔔 DISPARAMOS LA NOTIFICACIÓN A LA CAMPANITA
     await prisma.notification.create({
       data: {
-        userId: receiverId, // A quién le llega
+        userId: receiverId, 
         type: 'MESSAGE',
         content: `Tienes un nuevo mensaje de @${senderInfo?.username || 'Usuario'}. 💬`,
-        link: '/dashboard/messages' // A dónde lo lleva al darle clic
+        link: '/dashboard/messages' 
       }
     });
 
@@ -171,7 +168,12 @@ exports.sendMessage = async (req, res) => {
       }
     } catch (e) {}
 
-    res.status(201).json({ message: 'Mensaje enviado ✉️', messageData: { ...newMessage, senderId: 'me', isUnlocked: true } });
+    // 🔥 CORRECCIÓN: Le devolvemos el chatId (activeConvId) al frontend para que sepa dónde está hablando
+    res.status(201).json({ 
+      message: 'Mensaje enviado ✉️', 
+      chatId: activeConvId, 
+      messageData: { ...newMessage, senderId: 'me', isUnlocked: true } 
+    });
   } catch (error) {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
