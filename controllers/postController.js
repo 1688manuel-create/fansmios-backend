@@ -156,7 +156,7 @@ exports.getAllPosts = async (req, res) => {
         } else { hasAccess = true; }
       }
 
-      const activePromo = post.user.promotions?.length > 0 ? post.user.promotions[0].package : null;
+      const activePromo = post.user.promotions?.length > 0 ? post.user.promotions.package : null;
       let weight = 0;
       if(activePromo === 'GOD') weight = 3; if(activePromo === 'PRO') weight = 2; if(activePromo === 'BASIC') weight = 1;
 
@@ -172,7 +172,7 @@ exports.getAllPosts = async (req, res) => {
         myReaction: myReactionObj ? myReactionObj.emoji : null, 
         reactionCounts,
         content: hasAccess ? post.content : null, 
-        mediaUrl: hasAccess ? post.mediaUrl : null,
+        mediaUrl: post.mediaUrl, // 🔥 MODIFICACIÓN APLICADA: Siempre se envía mediaUrl
         isPromoted: !!activePromo, promoTier: activePromo, weight
       };
 
@@ -212,7 +212,15 @@ exports.getCreatorPosts = async (req, res) => {
         if (reactionCounts[l.emoji] !== undefined) reactionCounts[l.emoji]++;
         else reactionCounts[l.emoji] = 1;
       });
-      return { ...post, hasAccess, myReaction: myReactionObj ? myReactionObj.emoji : null, reactionCounts };
+      
+      // 🔥 MODIFICACIÓN APLICADA: Solo bloqueamos el contenido de texto si no tiene acceso
+      return { 
+        ...post, 
+        hasAccess, 
+        myReaction: myReactionObj ? myReactionObj.emoji : null, 
+        reactionCounts,
+        content: hasAccess ? post.content : null 
+      };
     });
 
     res.status(200).json({ posts: formattedPosts, isSubscribed });
@@ -253,7 +261,6 @@ exports.toggleLike = async (req, res) => {
           userId: post.userId,
           type: 'LIKE',
           content: `@${fan.username} reaccionó con ${emoji || '❤️'} a tu publicación.`,
-          // Para Likes solo apuntamos al post
           link: `/feed#post-${post.id}`
         }
       });
@@ -278,7 +285,6 @@ exports.addComment = async (req, res) => {
 
     const fan = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
 
-    // 1. Creamos el comentario y obtenemos su ID real
     const comment = await prisma.comment.create({
       data: { content, postId: id, userId, parentId: parentId || null }
     });
@@ -291,7 +297,6 @@ exports.addComment = async (req, res) => {
             userId: parentComment.userId,
             type: 'REPLY',
             content: `@${fan.username} respondió a tu comentario: "${content.substring(0, 30)}..."`,
-            // 🔥 AQUÍ APUNTAMOS EXACTAMENTE AL COMENTARIO NUEVO
             link: `/feed#post-${post.id}-comment-${comment.id}` 
           }
         });
@@ -303,7 +308,6 @@ exports.addComment = async (req, res) => {
             userId: post.userId,
             type: 'COMMENT',
             content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
-            // 🔥 AQUÍ APUNTAMOS EXACTAMENTE AL COMENTARIO NUEVO
             link: `/feed#post-${post.id}-comment-${comment.id}` 
           }
         });
@@ -328,7 +332,7 @@ exports.deletePost = async (req, res) => {
     if (post.mediaUrl && post.mediaUrl.includes('cloudinary.com')) {
       const parts = post.mediaUrl.split('/');
       const filenameWithExt = parts[parts.length - 1];
-      const publicId = 'fansmio_uploads/' + filenameWithExt.split('.')[0]; 
+      const publicId = 'fansmio_uploads/' + filenameWithExt.split('.'); 
       await cloudinary.uploader.destroy(publicId).catch(() => console.log("No se pudo borrar de Cloudinary"));
     } else if (post.mediaUrl) {
       const fileName = post.mediaUrl.replace('/uploads/', '');
