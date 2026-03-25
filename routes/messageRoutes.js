@@ -8,8 +8,11 @@ const upload = require('../middlewares/uploadMiddleware'); // Middleware para la
 // Todas las rutas están protegidas
 router.use(verifyToken);
 
-// 0. Obtener lista de chats
+// 0. Obtener lista de chats (Del usuario normal)
 router.get('/conversations', messageController.getConversations);
+
+// 🔥 0.1 [MODO DIOS] Obtener TODOS los chats globales (Debe ir aquí arriba)
+router.get('/admin/all', messageController.getAllConversationsAdmin);
 
 // 0.5 Obtener conteo de no leídos
 router.get('/unread', messageController.getUnreadCount);

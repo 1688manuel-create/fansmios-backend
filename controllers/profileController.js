@@ -89,7 +89,7 @@ exports.getPublicProfile = async (req, res) => {
         role: true,
         creatorProfile: true, 
         _count: {
-          select: { posts: true } 
+          select: { posts: true, followers: true } // 🔥 AÑADIMOS EL CONTADOR DE FANS
         }
       }
     });

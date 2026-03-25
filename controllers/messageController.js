@@ -44,6 +44,44 @@ exports.getConversations = async (req, res) => {
 };
 
 // ==========================================
+// 🔥 0.1 [MODO DIOS] OBTENER TODAS LAS CONVERSACIONES GLOBALES
+// ==========================================
+exports.getAllConversationsAdmin = async (req, res) => {
+  try {
+    // Verificamos estricta seguridad
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: "Acceso denegado. Requiere Nivel de Administrador." });
+    }
+
+    // Extraemos ABSOLUTAMENTE TODOS los chats de la plataforma
+    const allConversations = await prisma.conversation.findMany({
+      include: {
+        creator: { select: { id: true, username: true } },
+        fan: { select: { id: true, username: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 } // Solo el último mensaje para la previsualización
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
+
+    const formattedAdminChats = allConversations.map(chat => {
+      const lastMessage = chat.messages;
+      return {
+        id: chat.id,
+        creator: chat.creator,
+        fan: chat.fan,
+        lastMsg: lastMessage ? (lastMessage.isPPV ? '🔒 [PPV]' : lastMessage.content || '📷 [Archivo]') : 'Chat vacío',
+        time: lastMessage ? new Date(lastMessage.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''
+      };
+    });
+
+    res.status(200).json({ conversations: formattedAdminChats });
+  } catch (error) {
+    console.error("Error en Modo Dios:", error);
+    res.status(500).json({ error: "Fallo crítico al extraer la base de datos de chats." });
+  }
+};
+
+// ==========================================
 // 0.5 OBTENER TOTAL DE MENSAJES SIN LEER
 // ==========================================
 exports.getUnreadCount = async (req, res) => {
