@@ -1,6 +1,9 @@
 // backend/controllers/messageController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+// 🔥 INYECTAMOS CLOUDINARY Y FS PARA BORRAR LA BASURA LOCAL
+const { cloudinary } = require('../utils/cloudinaryConfig');
+const fs = require('fs');
 
 let socketHandler;
 try {
@@ -70,7 +73,7 @@ exports.getAllConversationsAdmin = async (req, res) => {
         creator: chat.creator,
         fan: chat.fan,
         lastMsg: lastMessage ? (lastMessage.isPPV ? '🔒 [PPV]' : lastMessage.content || '📷 [Archivo]') : 'Chat vacío',
-        time: lastMessage ? new Date(lastMessage.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''
+        time: lastMessage?.createdAt ? new Date(lastMessage.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : ''
       };
     });
 
@@ -135,15 +138,37 @@ exports.getConversation = async (req, res) => {
 };
 
 // ==========================================
-// 2. ENVIAR MENSAJE E INYECTAR NOTIFICACIÓN
+// 2. ENVIAR MENSAJE E INYECTAR NOTIFICACIÓN (CON CLOUDINARY ☁️)
 // ==========================================
 exports.sendMessage = async (req, res) => {
   try {
     const senderId = req.user.userId;
     const { receiverId, content, isPPV, price, conversationId } = req.body;
-    const mediaUrl = req.file ? `/uploads/${req.file.filename}` : null;
-
+    
     if (senderId === receiverId) return res.status(400).json({ error: 'No puedes enviarte mensajes a ti mismo.' });
+
+    // 🔥 NUEVA LÓGICA DE CLOUDINARY PARA ELIMINAR LA DEPENDENCIA LOCAL
+    let mediaUrl = null;
+    if (req.file) {
+      try {
+        // 1. Subimos el archivo a la nube (resource_type 'auto' acepta videos, audios y fotos)
+        const result = await cloudinary.uploader.upload(req.file.path, {
+          folder: "fansmio_messages",
+          resource_type: "auto" 
+        });
+        
+        // 2. Guardamos la URL segura de la nube
+        mediaUrl = result.secure_url;
+        
+        // 3. Borramos el archivo local temporal para no llenar el disco duro de Coolify
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      } catch (uploadError) {
+        console.error("🚨 Error subiendo archivo a Cloudinary:", uploadError);
+        return res.status(500).json({ error: 'Fallo al subir el archivo multimedia a la nube.' });
+      }
+    }
 
     const isBlocked = await prisma.block.findFirst({
       where: { OR: [ { blockerId: senderId, blockedId: receiverId }, { blockerId: receiverId, blockedId: senderId } ] }
@@ -176,7 +201,7 @@ exports.sendMessage = async (req, res) => {
         conversationId: activeConvId,
         senderId, receiverId, 
         content: content || null, 
-        mediaUrl,
+        mediaUrl, // 🔥 Ahora guarda el link indestructible de Cloudinary
         isPPV: isPpvBool, 
         price: isPpvBool ? parseFloat(price) : 0.0
       }
@@ -214,7 +239,8 @@ exports.sendMessage = async (req, res) => {
       messageData: { ...newMessage, senderId: 'me', isUnlocked: true } 
     });
   } catch (error) {
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error("Error en sendMessage:", error);
+    res.status(500).json({ error: 'Error interno del servidor al enviar mensaje.' });
   }
 };
 
