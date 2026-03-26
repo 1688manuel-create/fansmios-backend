@@ -308,3 +308,40 @@ exports.sendBroadcast = async (req, res) => {
     res.status(500).json({ error: 'Error al enviar broadcast' });
   }
 };
+
+// 🔥 ANIQUILAR CONVERSACIÓN COMPLETA
+exports.deleteConversation = async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user.id; // Asume que tienes el middleware de autenticación (protect)
+
+    // 1. Buscamos la conversación
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId }
+    });
+
+    if (!conversation) {
+      return res.status(404).json({ error: 'La conversación ya no existe.' });
+    }
+
+    // 2. Seguridad: Verificamos que el usuario sea parte del chat (o un Admin)
+    if (conversation.fanId !== userId && conversation.creatorId !== userId && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'No tienes permiso para destruir este chat.' });
+    }
+
+    // 3. Borramos todos los mensajes de esa conversación primero
+    await prisma.message.deleteMany({
+      where: { conversationId: conversationId }
+    });
+
+    // 4. Borramos la conversación vacía
+    await prisma.conversation.delete({
+      where: { id: conversationId }
+    });
+
+    res.status(200).json({ message: '💥 Chat y mensajes aniquilados con éxito.' });
+  } catch (error) {
+    console.error("Error al destruir la conversación:", error);
+    res.status(500).json({ error: 'Error interno al intentar destruir el chat.' });
+  }
+};

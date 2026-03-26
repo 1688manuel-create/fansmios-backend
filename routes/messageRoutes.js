@@ -34,4 +34,7 @@ router.post('/broadcast', isCreator, upload.single('media'), messageController.s
 // 5. Eliminar mensaje
 router.delete('/:messageId', messageController.deleteMessage);
 
+// La ruta que el Frontend está intentando golpear
+router.delete('/conversation/:conversationId', protect, messageController.deleteConversation);
+
 module.exports = router;
