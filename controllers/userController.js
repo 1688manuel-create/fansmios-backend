@@ -48,21 +48,38 @@ exports.updateProfile = async (req, res) => {
 
     console.log("====================================");
     console.log("📥 DATOS RECIBIDOS DESDE EL FRONTEND:");
-    console.log(req.body); // Esto nos dejará ver si los datos están llegando
+    console.log(req.body); 
     console.log("====================================");
 
-    // Extraemos la info (incluyendo Privacidad)
-    const { bio, monthlyPrice, name, category, welcomeMessage, hideStats, blockedCountries } = req.body;
+    // 🔥 FIX 1: AHORA SÍ EXTRAEMOS EL USERNAME
+    const { bio, monthlyPrice, name, username, category, welcomeMessage, hideStats, blockedCountries } = req.body;
 
-    // 1. Guardamos el Nombre Real/Artístico
-    if (name !== undefined) {
+    // 1. Guardamos el Nombre Real/Artístico Y EL NUEVO USERNAME
+    const userUpdateData = {};
+    if (name !== undefined) userUpdateData.name = name;
+    
+    // 🚀 EL HACK PARA CAMBIAR EL USUARIO
+    if (username) {
+      const cleanUsername = username.toLowerCase().replace(/\s+/g, ''); // Lo limpiamos (sin espacios, minúsculas)
+      
+      // Verificamos que no esté en uso por otro creador
+      const existingUser = await prisma.user.findUnique({ where: { username: cleanUsername } });
+      if (existingUser && existingUser.id !== targetUserId) {
+        return res.status(400).json({ error: 'Ese nombre de usuario ya está ocupado. Elige otro.' });
+      }
+      
+      userUpdateData.username = cleanUsername; // Lo agregamos al paquete de actualización
+    }
+
+    // Actualizamos la tabla Principal (User)
+    if (Object.keys(userUpdateData).length > 0) {
       await prisma.user.update({
         where: { id: targetUserId },
-        data: { name: name }
+        data: userUpdateData
       });
     }
 
-    // 2.🔥 CÓDIGO CORREGIDO (DEJA PASAR LOS LINKS)
+    // 2. Preparamos los datos del Perfil del Creador
     const profileData = {
       bio: req.body.bio || null,
       monthlyPrice: req.body.monthlyPrice ? parseFloat(req.body.monthlyPrice) : 0,
@@ -70,8 +87,6 @@ exports.updateProfile = async (req, res) => {
       welcomeMessage: req.body.welcomeMessage || null,
       hideStats: req.body.hideStats === 'true',
       blockedCountries: req.body.blockedCountries || null,
-      
-      // 🚀 INYECTA ESTAS 3 LÍNEAS AQUÍ:
       instagram: req.body.instagram || null,
       twitter: req.body.twitter || null,
       website: req.body.website || null
@@ -82,16 +97,16 @@ exports.updateProfile = async (req, res) => {
     // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary
     if (req.files) {
       if (req.files.profileImage && req.files.profileImage.length > 0) {
-        const result = await cloudinary.uploader.upload(req.files.profileImage[0].path, { folder: "fansmio_profiles" });
+        const result = await cloudinary.uploader.upload(req.files.profileImage.path, { folder: "fansmio_profiles" });
         profileData.profileImage = result.secure_url;
       }
       if (req.files.coverImage && req.files.coverImage.length > 0) {
-        const result = await cloudinary.uploader.upload(req.files.coverImage[0].path, { folder: "fansmio_profiles" });
+        const result = await cloudinary.uploader.upload(req.files.coverImage.path, { folder: "fansmio_profiles" });
         profileData.coverImage = result.secure_url;
       }
     }
 
-    // 4. Inyectamos los datos
+    // 4. Inyectamos los datos en la tabla CreatorProfile
     const updatedProfile = await prisma.creatorProfile.update({
       where: { userId: targetUserId },
       data: profileData
