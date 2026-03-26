@@ -38,40 +38,36 @@ exports.becomeCreator = async (req, res) => {
 };
 
 // ==========================================
-// 2. CREADOR (Y ADMIN): Editar Perfil Público (CON RADARES 🚨)
+// 2. CREADOR (Y ADMIN): Editar Perfil Público (VERSIÓN DEFINITIVA Y BLINDADA 🛡️)
 // ==========================================
 exports.updateProfile = async (req, res) => {
   try {
+    // Definimos a quién estamos editando (A nosotros mismos, o a otro si somos Admin)
     const targetUserId = (req.user.role === 'ADMIN' && req.body.targetUserId) 
                           ? req.body.targetUserId 
                           : req.user.userId;
 
     console.log("====================================");
-    console.log("📥 DATOS RECIBIDOS DESDE EL FRONTEND:");
-    console.log(req.body); 
+    console.log("📥 DATOS RECIBIDOS DESDE EL FRONTEND:", req.body);
     console.log("====================================");
 
-    // 🔥 FIX 1: AHORA SÍ EXTRAEMOS EL USERNAME
-    const { bio, monthlyPrice, name, username, category, welcomeMessage, hideStats, blockedCountries } = req.body;
+    // 1. EXTRAER Y LIMPIAR DATOS BÁSICOS
+    const { bio, monthlyPrice, name, username, category, welcomeMessage, hideStats, blockedCountries, instagram, twitter, website } = req.body;
 
-    // 1. Guardamos el Nombre Real/Artístico Y EL NUEVO USERNAME
+    // 2. ACTUALIZAR TABLA PRINCIPAL (USER) - Nombre y Username
     const userUpdateData = {};
     if (name !== undefined) userUpdateData.name = name;
     
-    // 🚀 EL HACK PARA CAMBIAR EL USUARIO
+    // Si mandan un username nuevo, verificamos que no esté ocupado
     if (username) {
-      const cleanUsername = username.toLowerCase().replace(/\s+/g, ''); // Lo limpiamos (sin espacios, minúsculas)
-      
-      // Verificamos que no esté en uso por otro creador
+      const cleanUsername = username.toLowerCase().replace(/\s+/g, '');
       const existingUser = await prisma.user.findUnique({ where: { username: cleanUsername } });
       if (existingUser && existingUser.id !== targetUserId) {
-        return res.status(400).json({ error: 'Ese nombre de usuario ya está ocupado. Elige otro.' });
+        return res.status(400).json({ error: 'Ese nombre de usuario ya está ocupado.' });
       }
-      
-      userUpdateData.username = cleanUsername; // Lo agregamos al paquete de actualización
+      userUpdateData.username = cleanUsername;
     }
 
-    // Actualizamos la tabla Principal (User)
     if (Object.keys(userUpdateData).length > 0) {
       await prisma.user.update({
         where: { id: targetUserId },
@@ -79,42 +75,37 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    // 2. Preparamos los datos del Perfil del Creador
+    // 3. PREPARAR DATOS DEL PERFIL (CREATOR PROFILE)
     const profileData = {
-      bio: req.body.bio || null,
-      monthlyPrice: req.body.monthlyPrice ? parseFloat(req.body.monthlyPrice) : 0,
-      category: req.body.category || 'General',
-      welcomeMessage: req.body.welcomeMessage || null,
-      hideStats: req.body.hideStats === 'true',
-      blockedCountries: req.body.blockedCountries || null,
-      instagram: req.body.instagram || null,
-      twitter: req.body.twitter || null,
-      website: req.body.website || null
+      bio: bio || null,
+      monthlyPrice: monthlyPrice ? parseFloat(monthlyPrice) : 0,
+      category: category || 'General',
+      welcomeMessage: welcomeMessage || null,
+      hideStats: hideStats === 'true' || hideStats === true,
+      blockedCountries: blockedCountries || null,
+      instagram: instagram || null,
+      twitter: twitter || null,
+      website: website || null
     };
 
-    console.log("💾 DATOS LISTOS PARA GUARDARSE EN LA BD:", profileData);
-
-    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (BÁSICO Y DE HIERRO 🛡️)
+    // 4. PROCESAR IMÁGENES DE CLOUDINARY (SIN BUCLES, DIRECTO Y SEGURO)
     if (req.files) {
-      
-      // -- PROCESAR FOTO DE PERFIL --
+      // -- Foto de Perfil --
       let profileImagePath = null;
       if (req.files.profileImage) {
-        // Verificamos si viene en una lista (Array) o como un objeto directo
         if (Array.isArray(req.files.profileImage) && req.files.profileImage.length > 0) {
           profileImagePath = req.files.profileImage.path;
         } else if (req.files.profileImage.path) {
           profileImagePath = req.files.profileImage.path;
         }
       }
-
       if (profileImagePath) {
-        console.log("📸 Subiendo Foto de Perfil...");
+        console.log("📸 Subiendo Foto de Perfil a Cloudinary...");
         const result = await cloudinary.uploader.upload(profileImagePath, { folder: "fansmio_profiles" });
         profileData.profileImage = result.secure_url;
       }
 
-      // -- PROCESAR FOTO DE PORTADA --
+      // -- Foto de Portada --
       let coverImagePath = null;
       if (req.files.coverImage) {
         if (Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
@@ -123,18 +114,24 @@ exports.updateProfile = async (req, res) => {
           coverImagePath = req.files.coverImage.path;
         }
       }
-
       if (coverImagePath) {
-        console.log("🖼️ Subiendo Foto de Portada...");
+        console.log("🖼️ Subiendo Foto de Portada a Cloudinary...");
         const result = await cloudinary.uploader.upload(coverImagePath, { folder: "fansmio_profiles" });
         profileData.coverImage = result.secure_url;
       }
     }
 
-    // 4. Inyectamos los datos en la tabla CreatorProfile
-    const updatedProfile = await prisma.creatorProfile.update({
+    console.log("💾 DATOS LISTOS PARA UPSERT EN BD:", profileData);
+
+    // 5. UPSERT: EL ARMA SECRETA PARA EL ADMIN Y CREADORES NUEVOS
+    // Si el perfil existe lo actualiza, si no existe LO CREA.
+    const updatedProfile = await prisma.creatorProfile.upsert({
       where: { userId: targetUserId },
-      data: profileData
+      update: profileData,
+      create: {
+        userId: targetUserId,
+        ...profileData
+      }
     });
 
     res.status(200).json({ message: 'Perfil actualizado exitosamente', profile: updatedProfile });
