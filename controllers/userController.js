@@ -94,14 +94,22 @@ exports.updateProfile = async (req, res) => {
 
     console.log("💾 DATOS LISTOS PARA GUARDARSE EN LA BD:", profileData);
 
-    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary
+    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (BLINDADO 🛡️)
     if (req.files) {
       if (req.files.profileImage && req.files.profileImage.length > 0) {
-        const result = await cloudinary.uploader.upload(req.files.profileImage.path, { folder: "fansmio_profiles" });
+        const file = req.files.profileImage;
+        // Hack: Si no hay 'path', extraemos el archivo de la memoria RAM (buffer)
+        const fileContent = file.path ? file.path : `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+        
+        const result = await cloudinary.uploader.upload(fileContent, { folder: "fansmio_profiles" });
         profileData.profileImage = result.secure_url;
       }
+      
       if (req.files.coverImage && req.files.coverImage.length > 0) {
-        const result = await cloudinary.uploader.upload(req.files.coverImage.path, { folder: "fansmio_profiles" });
+        const file = req.files.coverImage;
+        const fileContent = file.path ? file.path : `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+        
+        const result = await cloudinary.uploader.upload(fileContent, { folder: "fansmio_profiles" });
         profileData.coverImage = result.secure_url;
       }
     }
