@@ -94,23 +94,45 @@ exports.updateProfile = async (req, res) => {
 
     console.log("💾 DATOS LISTOS PARA GUARDARSE EN LA BD:", profileData);
 
-    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (BLINDADO 🛡️)
+    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (ADAPTADOR UNIVERSAL 🛡️)
     if (req.files) {
-      if (req.files.profileImage && req.files.profileImage.length > 0) {
-        const file = req.files.profileImage;
-        // Hack: Si no hay 'path', extraemos el archivo de la memoria RAM (buffer)
-        const fileContent = file.path ? file.path : `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+      
+      // Creamos un motor de procesamiento inteligente
+      const processAndUploadFile = async (fileArray) => {
+        if (!fileArray || fileArray.length === 0) return null;
+        const file = fileArray;
         
+        console.log("🔍 RADAR ACTIVADO - ANATOMÍA DEL ARCHIVO:", file); // Esto nos dirá la verdad
+        
+        let fileContent = null;
+        
+        // Escaneamos dónde está escondido el archivo
+        if (file.path) fileContent = file.path; // Multer Disco / Cloudinary
+        else if (file.buffer) fileContent = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`; // Multer Memoria
+        else if (file.data) fileContent = `data:${file.mimetype};base64,${file.data.toString('base64')}`; // Express-fileupload
+        else if (file.tempFilePath) fileContent = file.tempFilePath; // Express-fileupload Temp
+        else if (file.location) fileContent = file.location; // AWS S3
+        
+        if (!fileContent) {
+          console.log("⚠️ ALERTA: Archivo vacío o formato desconocido. Se omitirá.");
+          return null;
+        }
+
+        // Si lo encontramos, disparamos a Cloudinary
         const result = await cloudinary.uploader.upload(fileContent, { folder: "fansmio_profiles" });
-        profileData.profileImage = result.secure_url;
+        return result.secure_url;
+      };
+
+      // Procesamos Foto de Perfil
+      if (req.files.profileImage) {
+        const url = await processAndUploadFile(req.files.profileImage);
+        if (url) profileData.profileImage = url;
       }
       
-      if (req.files.coverImage && req.files.coverImage.length > 0) {
-        const file = req.files.coverImage;
-        const fileContent = file.path ? file.path : `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
-        
-        const result = await cloudinary.uploader.upload(fileContent, { folder: "fansmio_profiles" });
-        profileData.coverImage = result.secure_url;
+      // Procesamos Foto de Portada
+      if (req.files.coverImage) {
+        const url = await processAndUploadFile(req.files.coverImage);
+        if (url) profileData.coverImage = url;
       }
     }
 
