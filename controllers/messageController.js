@@ -309,11 +309,14 @@ exports.sendBroadcast = async (req, res) => {
   }
 };
 
-// 🔥 ANIQUILAR CONVERSACIÓN COMPLETA
+// 🔥 ANIQUILAR CONVERSACIÓN COMPLETA (VERSIÓN BLINDADA Y MULTI-DETECCIÓN)
 exports.deleteConversation = async (req, res) => {
   try {
     const { conversationId } = req.params;
-    const userId = req.user.id; // Asume que tienes el middleware de autenticación (protect)
+
+    // 🎯 EL TRUCO TÁCTICO: Capturamos el ID y el Rol de todas las formas posibles que usa Node.js
+    const userId = req.user?.id || req.userId || req.user?.userId || req.user?._id;
+    const userRole = req.user?.role || req.role;
 
     // 1. Buscamos la conversación
     const conversation = await prisma.conversation.findUnique({
@@ -324,12 +327,22 @@ exports.deleteConversation = async (req, res) => {
       return res.status(404).json({ error: 'La conversación ya no existe.' });
     }
 
-    // 2. Seguridad: Verificamos que el usuario sea parte del chat (o un Admin)
-    if (conversation.fanId !== userId && conversation.creatorId !== userId && req.user.role !== 'ADMIN') {
+    // 2. Seguridad: Verificamos si es el dueño o un Admin
+    const isFan = conversation.fanId === userId;
+    const isCreator = conversation.creatorId === userId;
+    const isAdmin = userRole === 'ADMIN';
+
+    if (!isFan && !isCreator && !isAdmin) {
+      // ⚠️ Si vuelve a fallar, esto dejará una huella exacta en la consola de Coolify
+      console.log("🚨 Bloqueo de seguridad detallado:", { 
+        dbFanId: conversation.fanId, 
+        dbCreatorId: conversation.creatorId, 
+        tuIdDetectado: userId 
+      });
       return res.status(403).json({ error: 'No tienes permiso para destruir este chat.' });
     }
 
-    // 3. Borramos todos los mensajes de esa conversación primero
+    // 3. Borramos todos los mensajes de esa conversación
     await prisma.message.deleteMany({
       where: { conversationId: conversationId }
     });
