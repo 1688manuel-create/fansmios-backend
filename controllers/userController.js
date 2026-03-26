@@ -38,27 +38,32 @@ exports.becomeCreator = async (req, res) => {
 };
 
 // ==========================================
-// 2. CREADOR (Y ADMIN): Editar Perfil Público (VERSIÓN DEFINITIVA Y BLINDADA 🛡️)
+// 2. CREADOR (Y ADMIN): Editar Perfil Público (ACTUALIZACIÓN PARCIAL DINÁMICA 🛡️)
 // ==========================================
 exports.updateProfile = async (req, res) => {
   try {
-    // Definimos a quién estamos editando (A nosotros mismos, o a otro si somos Admin)
-    const targetUserId = (req.user.role === 'ADMIN' && req.body.targetUserId) 
-                          ? req.body.targetUserId 
+    // 1. EXTRAER DATOS DEL FRONTEND
+    const { 
+      username, name, bio, monthlyPrice, category, welcomeMessage, 
+      hideStats, blockedCountries, instagram, twitter, website,
+      targetUserId: bodyTargetUserId 
+    } = req.body;
+
+    // 2. DEFINIR EL OBJETIVO (ADMIN O PROPIO)
+    const targetUserId = (req.user.role === 'ADMIN' && bodyTargetUserId) 
+                          ? bodyTargetUserId 
                           : req.user.userId;
 
     console.log("====================================");
     console.log("📥 DATOS RECIBIDOS DESDE EL FRONTEND:", req.body);
+    console.log("🧠 [RADAR] targetUserId a editar:", targetUserId);
+    console.log("🧠 [RADAR] Mi propio userId es:", req.user.userId);
     console.log("====================================");
 
-    // 1. EXTRAER Y LIMPIAR DATOS BÁSICOS
-    const { bio, monthlyPrice, name, username, category, welcomeMessage, hideStats, blockedCountries, instagram, twitter, website } = req.body;
-
-    // 2. ACTUALIZAR TABLA PRINCIPAL (USER) - Nombre y Username
+    // 3. ACTUALIZAR TABLA PRINCIPAL (USER)
     const userUpdateData = {};
     if (name !== undefined) userUpdateData.name = name;
     
-    // Si mandan un username nuevo, verificamos que no esté ocupado
     if (username) {
       const cleanUsername = username.toLowerCase().replace(/\s+/g, '');
       const existingUser = await prisma.user.findUnique({ where: { username: cleanUsername } });
@@ -75,22 +80,21 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    // 3. PREPARAR DATOS DEL PERFIL (CREATOR PROFILE)
-    const profileData = {
-      bio: bio || null,
-      monthlyPrice: monthlyPrice ? parseFloat(monthlyPrice) : 0,
-      category: category || 'General',
-      welcomeMessage: welcomeMessage || null,
-      hideStats: hideStats === 'true' || hideStats === true,
-      blockedCountries: blockedCountries || null,
-      instagram: instagram || null,
-      twitter: twitter || null,
-      website: website || null
-    };
+    // 4. PREPARAR DATOS DEL PERFIL (CONSTRUCCIÓN DINÁMICA EVITA-BORRADOS 🛡️)
+    const profileData = {};
 
-    // 4. PROCESAR IMÁGENES DE CLOUDINARY (CON EXTRACTOR INTELIGENTE 🛡️)
+    if (bio !== undefined) profileData.bio = bio;
+    if (monthlyPrice !== undefined) profileData.monthlyPrice = parseFloat(monthlyPrice);
+    if (category !== undefined) profileData.category = category;
+    if (welcomeMessage !== undefined) profileData.welcomeMessage = welcomeMessage;
+    if (hideStats !== undefined) profileData.hideStats = hideStats === 'true' || hideStats === true;
+    if (blockedCountries !== undefined) profileData.blockedCountries = blockedCountries;
+    if (instagram !== undefined) profileData.instagram = instagram;
+    if (twitter !== undefined) profileData.twitter = twitter;
+    if (website !== undefined) profileData.website = website;
+
+    // 5. PROCESAR IMÁGENES DE CLOUDINARY (EXTRACTOR INTELIGENTE)
     if (req.files) {
-      // Pinza extractora: Busca la ruta exacta del archivo sin importar la estructura
       const extractPath = (fileField) => {
         if (!fileField) return null;
         const file = Array.isArray(fileField) ? fileField : fileField;
@@ -98,32 +102,23 @@ exports.updateProfile = async (req, res) => {
       };
 
       try {
-        // -- Foto de Perfil --
         const pathPerfil = extractPath(req.files.profileImage);
         if (pathPerfil) {
-          console.log("📸 Subiendo Perfil. Ruta detectada:", pathPerfil);
           const resultPerfil = await cloudinary.uploader.upload(pathPerfil, { folder: "fansmio_profiles" });
           profileData.profileImage = resultPerfil.secure_url;
-          console.log("✅ Foto de Perfil enlazada:", resultPerfil.secure_url);
         }
 
-        // -- Foto de Portada --
         const pathPortada = extractPath(req.files.coverImage);
         if (pathPortada) {
-          console.log("🖼️ Subiendo Portada. Ruta detectada:", pathPortada);
           const resultPortada = await cloudinary.uploader.upload(pathPortada, { folder: "fansmio_profiles" });
           profileData.coverImage = resultPortada.secure_url;
-          console.log("✅ Foto de Portada enlazada:", resultPortada.secure_url);
         }
       } catch (cloudError) {
         console.error("🚨 ERROR DE NUBE (Cloudinary):", cloudError);
       }
     }
 
-    console.log("💾 DATOS LISTOS PARA UPSERT EN BD:", profileData);
-
-    // 5. UPSERT: EL ARMA SECRETA PARA EL ADMIN Y CREADORES NUEVOS
-    // Si el perfil existe lo actualiza, si no existe LO CREA.
+    // 6. UPSERT BLINDADO
     const updatedProfile = await prisma.creatorProfile.upsert({
       where: { userId: targetUserId },
       update: profileData,
@@ -132,6 +127,8 @@ exports.updateProfile = async (req, res) => {
         ...profileData
       }
     });
+
+    console.log("✅ PERFIL GUARDADO EXITOSAMENTE:", updatedProfile);
 
     res.status(200).json({ message: 'Perfil actualizado exitosamente', profile: updatedProfile });
 
