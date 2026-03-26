@@ -98,23 +98,27 @@ exports.updateProfile = async (req, res) => {
     if (req.files) {
       
       // Creamos un motor de procesamiento inteligente
-      const processAndUploadFile = async (fileArray) => {
-        if (!fileArray || fileArray.length === 0) return null;
-        const file = fileArray;
+      const processAndUploadFile = async (fileInput) => {
+        if (!fileInput) return null;
         
-        console.log("🔍 RADAR ACTIVADO - ANATOMÍA DEL ARCHIVO:", file); // Esto nos dirá la verdad
+        // 🎯 HACK TÁCTICO: Rompemos la caja (Array) para sacar el archivo real.
+        // Aplicamos doble seguro por si viene doblemente empaquetado.
+        let realFile = Array.isArray(fileInput) ? fileInput : fileInput;
+        if (Array.isArray(realFile)) realFile = realFile; 
+        
+        console.log("✅ ARCHIVO DESEMPAQUETADO:", realFile.originalname, "| RUTA:", realFile.path); 
         
         let fileContent = null;
         
         // Escaneamos dónde está escondido el archivo
-        if (file.path) fileContent = file.path; // Multer Disco / Cloudinary
-        else if (file.buffer) fileContent = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`; // Multer Memoria
-        else if (file.data) fileContent = `data:${file.mimetype};base64,${file.data.toString('base64')}`; // Express-fileupload
-        else if (file.tempFilePath) fileContent = file.tempFilePath; // Express-fileupload Temp
-        else if (file.location) fileContent = file.location; // AWS S3
+        if (realFile.path) fileContent = realFile.path; // Multer Disco
+        else if (realFile.buffer) fileContent = `data:${realFile.mimetype};base64,${realFile.buffer.toString('base64')}`; // Multer Memoria
+        else if (realFile.data) fileContent = `data:${realFile.mimetype};base64,${realFile.data.toString('base64')}`; // Express-fileupload
+        else if (realFile.tempFilePath) fileContent = realFile.tempFilePath; // Temp
+        else if (realFile.location) fileContent = realFile.location; // S3
         
         if (!fileContent) {
-          console.log("⚠️ ALERTA: Archivo vacío o formato desconocido. Se omitirá.");
+          console.log("⚠️ ALERTA: No se pudo extraer la ruta del archivo.");
           return null;
         }
 
