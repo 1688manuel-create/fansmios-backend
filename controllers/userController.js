@@ -1,7 +1,7 @@
 // backend/controllers/userController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const bcrypt = require('bcryptjs'); // Asegúrate de que esto esté arriba del archivo si no lo tienes
+const bcrypt = require('bcryptjs'); 
 const { cloudinary } = require('../utils/cloudinaryConfig');
 
 // ==========================================
@@ -94,7 +94,7 @@ exports.updateProfile = async (req, res) => {
       let profileImagePath = null;
       if (req.files.profileImage) {
         if (Array.isArray(req.files.profileImage) && req.files.profileImage.length > 0) {
-          profileImagePath = req.files.profileImage.path;
+          profileImagePath = req.files.profileImage.path; // 🔥 FIX: Agregamos
         } else if (req.files.profileImage.path) {
           profileImagePath = req.files.profileImage.path;
         }
@@ -109,7 +109,7 @@ exports.updateProfile = async (req, res) => {
       let coverImagePath = null;
       if (req.files.coverImage) {
         if (Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
-          coverImagePath = req.files.coverImage.path;
+          coverImagePath = req.files.coverImage.path; // 🔥 FIX: Agregamos
         } else if (req.files.coverImage.path) {
           coverImagePath = req.files.coverImage.path;
         }
@@ -180,8 +180,6 @@ exports.getProfile = async (req, res) => {
     }
 
     // 🛡️ ESCUDO ANTI-COLAPSO PARA ADMINS Y NUEVOS
-    // Si la cuenta aún no tiene el cascarón del perfil en la base de datos, 
-    // le enviamos uno temporal en blanco para que el formulario no explote.
     if (!user.creatorProfile) {
       user.creatorProfile = {
         bio: "",
@@ -217,7 +215,6 @@ exports.toggleFollow = async (req, res) => {
       return res.status(400).json({ error: "No puedes seguirte a ti mismo" });
     }
 
-    // Buscamos si ya lo sigue
     const existingFollow = await prisma.follow.findUnique({
       where: {
         followerId_followingId: { followerId, followingId }
@@ -225,11 +222,9 @@ exports.toggleFollow = async (req, res) => {
     });
 
     if (existingFollow) {
-      // Si ya lo sigue, lo eliminamos (Unfollow)
       await prisma.follow.delete({ where: { id: existingFollow.id } });
       return res.status(200).json({ message: "Has dejado de seguir a este creador", isFollowing: false });
     } else {
-      // Si no lo sigue, lo creamos (Follow)
       await prisma.follow.create({
         data: { followerId, followingId }
       });
@@ -251,11 +246,9 @@ exports.updateEmail = async (req, res) => {
 
     if (!newEmail) return res.status(400).json({ error: 'Debes proporcionar un nuevo email.' });
 
-    // 1. Verificamos si el email ya está tomado por otra persona
     const existingUser = await prisma.user.findUnique({ where: { email: newEmail } });
     if (existingUser) return res.status(400).json({ error: 'Este correo ya está en uso por otra cuenta.' });
 
-    // 2. Guardamos el nuevo correo
     const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: { email: newEmail }
@@ -278,19 +271,15 @@ exports.updatePassword = async (req, res) => {
 
     if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Faltan campos obligatorios.' });
 
-    // 1. Buscamos al usuario en la BD
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
 
-    // 2. Comparamos si la contraseña actual es correcta
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) return res.status(400).json({ error: 'La contraseña actual es incorrecta. 🛑' });
 
-    // 3. Encriptamos la nueva contraseña
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-    // 4. Guardamos
     await prisma.user.update({
       where: { id: userId },
       data: { password: hashedPassword }
@@ -320,7 +309,6 @@ exports.updateNotificationSettings = async (req, res) => {
       }
     });
 
-    // Devolvemos el usuario actualizado para que el Frontend lo guarde
     res.status(200).json({ 
       message: '✅ Preferencias de notificaciones guardadas.',
       user: {
@@ -346,14 +334,12 @@ exports.getMyNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
     
-    // Traemos las últimas 50 notificaciones del usuario
     const notifications = await prisma.notification.findMany({
       where: { userId: userId },
       orderBy: { createdAt: 'desc' },
       take: 50 
     });
 
-    // Contamos cuántas están sin leer para poner el numerito rojo
     const unreadCount = await prisma.notification.count({
       where: { userId: userId, isRead: false }
     });
@@ -411,14 +397,13 @@ exports.savePushToken = async (req, res) => {
 // ==========================================
 exports.getTrendingCreators = async (req, res) => {
   try {
-    // Buscamos a los usuarios que son Creadores o Admins
     const trendingCreators = await prisma.user.findMany({
       where: {
         role: { in: ['CREATOR', 'ADMIN'] }
       },
-      take: 5, // Traemos máximo 5 para que la barra no se haga gigante
+      take: 5, 
       orderBy: {
-        createdAt: 'desc' // Por ahora traemos a los más nuevos
+        createdAt: 'desc' 
       },
       select: {
         id: true,
@@ -433,12 +418,11 @@ exports.getTrendingCreators = async (req, res) => {
       }
     });
 
-    // Le damos el formato exacto que espera tu Frontend
     const formattedTrending = trendingCreators.map(creator => ({
       id: creator.id,
       username: creator.username,
-      name: creator.name || creator.username, // Si no tiene nombre, usamos su @usuario
-      isOnline: Math.random() > 0.5, // Le ponemos el puntito verde de "En línea" al azar para darle realismo
+      name: creator.name || creator.username, 
+      isOnline: Math.random() > 0.5, 
       creatorProfile: creator.creatorProfile
     }));
 
@@ -452,14 +436,13 @@ exports.getTrendingCreators = async (req, res) => {
 // OBTENER AL CREADOR CON EL BOOST NIVEL DIOS (HISTORIA DORADA)
 exports.getVipCreator = async (req, res) => {
   try {
-    // Buscamos a alguien que haya pagado el paquete 'GOD' y su tiempo no haya expirado
     const activeGodPromo = await prisma.promotion.findFirst({
       where: {
         package: 'GOD',
         active: true,
-        expiresAt: { gt: new Date() } // Que la fecha de vencimiento sea mayor a hoy
+        expiresAt: { gt: new Date() } 
       },
-      orderBy: { createdAt: 'desc' }, // Si hay varios, mostramos al más reciente
+      orderBy: { createdAt: 'desc' }, 
       include: {
         creator: {
           select: {
@@ -471,7 +454,6 @@ exports.getVipCreator = async (req, res) => {
       }
     });
 
-    // Si hay alguien que pagó, enviamos sus datos. Si no, enviamos null y el aro VIP no sale.
     res.status(200).json({ vip: activeGodPromo ? activeGodPromo.creator : null });
   } catch (error) {
     console.error('Error fetching VIP Creator:', error);
