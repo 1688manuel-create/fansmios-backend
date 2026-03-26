@@ -6,10 +6,14 @@ exports.getCreatorStats = async (req, res) => {
   try {
     const creatorId = req.user.userId;
 
-    // 1. Contar Suscriptores Activos
-    const activeSubscribers = await prisma.subscription.count({
-      where: { creatorId: creatorId, status: 'ACTIVE' }
+    // 1. Contar Suscriptores Activos (🔥 FIX: Solo usuarios únicos)
+    const uniqueActiveSubscribers = await prisma.subscription.findMany({
+      where: { creatorId: creatorId, status: 'ACTIVE' },
+      distinct: ['userId'], // El escudo anti-clones: agrupa por usuario único
+      select: { userId: true } // Solo traemos el ID para que la consulta sea ultra rápida
     });
+    
+    const activeSubscribers = uniqueActiveSubscribers.length;
 
     // 2. Traer todos los posts para sumar Likes y Comentarios
     const posts = await prisma.post.findMany({
