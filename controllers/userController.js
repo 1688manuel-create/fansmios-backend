@@ -169,7 +169,7 @@ exports.getAllUsers = async (req, res) => {
 };
 
 // ==========================================
-// 4. OBTENER PERFIL DEL USUARIO
+// 4. OBTENER PERFIL DEL USUARIO (Blindado 🛡️)
 // ==========================================
 exports.getProfile = async (req, res) => {
   try {
@@ -177,10 +177,34 @@ exports.getProfile = async (req, res) => {
       where: { id: req.user.userId },
       include: { creatorProfile: true }
     });
+
+    if (!user) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    // 🛡️ ESCUDO ANTI-COLAPSO PARA ADMINS Y NUEVOS
+    // Si la cuenta aún no tiene el cascarón del perfil en la base de datos, 
+    // le enviamos uno temporal en blanco para que el formulario no explote.
+    if (!user.creatorProfile) {
+      user.creatorProfile = {
+        bio: "",
+        monthlyPrice: 0,
+        category: "General",
+        welcomeMessage: "",
+        hideStats: false,
+        blockedCountries: "",
+        instagram: "",
+        twitter: "",
+        website: "",
+        profileImage: null,
+        coverImage: null
+      };
+    }
+
     res.status(200).json({ user });
   } catch (error) {
-    console.error('Error obteniendo perfil:', error);
-    res.status(500).json({ error: 'Error interno' });
+    console.error('🚨 Error obteniendo perfil:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
 
