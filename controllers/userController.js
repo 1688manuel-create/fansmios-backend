@@ -88,33 +88,36 @@ exports.updateProfile = async (req, res) => {
       website: website || null
     };
 
-    // 4. PROCESAR IMÁGENES DE CLOUDINARY (BLINDADO CON RADARES 🛡️)
+    // 4. PROCESAR IMÁGENES DE CLOUDINARY (CON EXTRACTOR INTELIGENTE 🛡️)
     if (req.files) {
-      console.log("🔍 [RADAR] Archivos detectados en la aduana:", Object.keys(req.files));
-      
+      // Pinza extractora: Busca la ruta exacta del archivo sin importar la estructura
+      const extractPath = (fileField) => {
+        if (!fileField) return null;
+        const file = Array.isArray(fileField) ? fileField : fileField;
+        return file.path || file.tempFilePath || file.filepath || null;
+      };
+
       try {
         // -- Foto de Perfil --
-        if (req.files.profileImage && req.files.profileImage) {
-          const pathPerfil = req.files.profileImage.path;
-          console.log("📸 Disparando Foto de Perfil a Cloudinary... Ruta:", pathPerfil);
+        const pathPerfil = extractPath(req.files.profileImage);
+        if (pathPerfil) {
+          console.log("📸 Subiendo Perfil. Ruta detectada:", pathPerfil);
           const resultPerfil = await cloudinary.uploader.upload(pathPerfil, { folder: "fansmio_profiles" });
           profileData.profileImage = resultPerfil.secure_url;
-          console.log("✅ Foto de Perfil enlazada con éxito:", resultPerfil.secure_url);
+          console.log("✅ Foto de Perfil enlazada:", resultPerfil.secure_url);
         }
 
-        // -- Foto de Portada (Banner) --
-        if (req.files.coverImage && req.files.coverImage) {
-          const pathPortada = req.files.coverImage.path;
-          console.log("🖼️ Disparando Foto de Portada a Cloudinary... Ruta:", pathPortada);
+        // -- Foto de Portada --
+        const pathPortada = extractPath(req.files.coverImage);
+        if (pathPortada) {
+          console.log("🖼️ Subiendo Portada. Ruta detectada:", pathPortada);
           const resultPortada = await cloudinary.uploader.upload(pathPortada, { folder: "fansmio_profiles" });
           profileData.coverImage = resultPortada.secure_url;
-          console.log("✅ Foto de Portada enlazada con éxito:", resultPortada.secure_url);
+          console.log("✅ Foto de Portada enlazada:", resultPortada.secure_url);
         }
       } catch (cloudError) {
-        console.error("🚨 ERROR FATAL DE NUBE (Cloudinary rechazó la imagen):", cloudError);
+        console.error("🚨 ERROR DE NUBE (Cloudinary):", cloudError);
       }
-    } else {
-      console.log("⚠️ [RADAR] No se detectó ninguna imagen nueva en esta petición.");
     }
 
     console.log("💾 DATOS LISTOS PARA UPSERT EN BD:", profileData);
