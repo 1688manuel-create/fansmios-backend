@@ -94,49 +94,29 @@ exports.updateProfile = async (req, res) => {
 
     console.log("💾 DATOS LISTOS PARA GUARDARSE EN LA BD:", profileData);
 
-    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (ADAPTADOR UNIVERSAL 🛡️)
+    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (CÓDIGO DEFINITIVO 🛡️)
     if (req.files) {
       
-      // Creamos un motor de procesamiento inteligente
-      const processAndUploadFile = async (fileInput) => {
-        if (!fileInput) return null;
-        
-        // 🎯 HACK TÁCTICO: Rompemos la caja (Array) para sacar el archivo real.
-        // Aplicamos doble seguro por si viene doblemente empaquetado.
-        let realFile = Array.isArray(fileInput) ? fileInput : fileInput;
-        if (Array.isArray(realFile)) realFile = realFile; 
-        
-        console.log("✅ ARCHIVO DESEMPAQUETADO:", realFile.originalname, "| RUTA:", realFile.path); 
-        
-        let fileContent = null;
-        
-        // Escaneamos dónde está escondido el archivo
-        if (realFile.path) fileContent = realFile.path; // Multer Disco
-        else if (realFile.buffer) fileContent = `data:${realFile.mimetype};base64,${realFile.buffer.toString('base64')}`; // Multer Memoria
-        else if (realFile.data) fileContent = `data:${realFile.mimetype};base64,${realFile.data.toString('base64')}`; // Express-fileupload
-        else if (realFile.tempFilePath) fileContent = realFile.tempFilePath; // Temp
-        else if (realFile.location) fileContent = realFile.location; // S3
-        
-        if (!fileContent) {
-          console.log("⚠️ ALERTA: No se pudo extraer la ruta del archivo.");
-          return null;
-        }
-
-        // Si lo encontramos, disparamos a Cloudinary
-        const result = await cloudinary.uploader.upload(fileContent, { folder: "fansmio_profiles" });
-        return result.secure_url;
+      // Rastreador inteligente: Busca la foto sin importar cómo venga empaquetada
+      const getFilePath = (fileData) => {
+        if (!fileData) return null;
+        if (fileData.path) return fileData.path;
+        if (Array.isArray(fileData) && fileData.length > 0) return getFilePath(fileData);
+        return null;
       };
 
-      // Procesamos Foto de Perfil
-      if (req.files.profileImage) {
-        const url = await processAndUploadFile(req.files.profileImage);
-        if (url) profileData.profileImage = url;
+      const profileImagePath = getFilePath(req.files.profileImage);
+      if (profileImagePath) {
+        console.log("📸 Subiendo nueva Foto de Perfil a Cloudinary...");
+        const result = await cloudinary.uploader.upload(profileImagePath, { folder: "fansmio_profiles" });
+        profileData.profileImage = result.secure_url;
       }
-      
-      // Procesamos Foto de Portada
-      if (req.files.coverImage) {
-        const url = await processAndUploadFile(req.files.coverImage);
-        if (url) profileData.coverImage = url;
+
+      const coverImagePath = getFilePath(req.files.coverImage);
+      if (coverImagePath) {
+        console.log("🖼️ Subiendo nueva Foto de Portada a Cloudinary...");
+        const result = await cloudinary.uploader.upload(coverImagePath, { folder: "fansmio_profiles" });
+        profileData.coverImage = result.secure_url;
       }
     }
 
