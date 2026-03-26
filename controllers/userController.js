@@ -88,37 +88,33 @@ exports.updateProfile = async (req, res) => {
       website: website || null
     };
 
-    // 4. PROCESAR IMÁGENES DE CLOUDINARY (SIN BUCLES, DIRECTO Y SEGURO)
+    // 4. PROCESAR IMÁGENES DE CLOUDINARY (BLINDADO CON RADARES 🛡️)
     if (req.files) {
-      // -- Foto de Perfil --
-      let profileImagePath = null;
-      if (req.files.profileImage) {
-        if (Array.isArray(req.files.profileImage) && req.files.profileImage.length > 0) {
-          profileImagePath = req.files.profileImage.path; // 🔥 FIX: Agregamos
-        } else if (req.files.profileImage.path) {
-          profileImagePath = req.files.profileImage.path;
+      console.log("🔍 [RADAR] Archivos detectados en la aduana:", Object.keys(req.files));
+      
+      try {
+        // -- Foto de Perfil --
+        if (req.files.profileImage && req.files.profileImage) {
+          const pathPerfil = req.files.profileImage.path;
+          console.log("📸 Disparando Foto de Perfil a Cloudinary... Ruta:", pathPerfil);
+          const resultPerfil = await cloudinary.uploader.upload(pathPerfil, { folder: "fansmio_profiles" });
+          profileData.profileImage = resultPerfil.secure_url;
+          console.log("✅ Foto de Perfil enlazada con éxito:", resultPerfil.secure_url);
         }
-      }
-      if (profileImagePath) {
-        console.log("📸 Subiendo Foto de Perfil a Cloudinary...");
-        const result = await cloudinary.uploader.upload(profileImagePath, { folder: "fansmio_profiles" });
-        profileData.profileImage = result.secure_url;
-      }
 
-      // -- Foto de Portada --
-      let coverImagePath = null;
-      if (req.files.coverImage) {
-        if (Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
-          coverImagePath = req.files.coverImage.path; // 🔥 FIX: Agregamos
-        } else if (req.files.coverImage.path) {
-          coverImagePath = req.files.coverImage.path;
+        // -- Foto de Portada (Banner) --
+        if (req.files.coverImage && req.files.coverImage) {
+          const pathPortada = req.files.coverImage.path;
+          console.log("🖼️ Disparando Foto de Portada a Cloudinary... Ruta:", pathPortada);
+          const resultPortada = await cloudinary.uploader.upload(pathPortada, { folder: "fansmio_profiles" });
+          profileData.coverImage = resultPortada.secure_url;
+          console.log("✅ Foto de Portada enlazada con éxito:", resultPortada.secure_url);
         }
+      } catch (cloudError) {
+        console.error("🚨 ERROR FATAL DE NUBE (Cloudinary rechazó la imagen):", cloudError);
       }
-      if (coverImagePath) {
-        console.log("🖼️ Subiendo Foto de Portada a Cloudinary...");
-        const result = await cloudinary.uploader.upload(coverImagePath, { folder: "fansmio_profiles" });
-        profileData.coverImage = result.secure_url;
-      }
+    } else {
+      console.log("⚠️ [RADAR] No se detectó ninguna imagen nueva en esta petición.");
     }
 
     console.log("💾 DATOS LISTOS PARA UPSERT EN BD:", profileData);

@@ -139,6 +139,7 @@ exports.getPublicProfile = async (req, res) => {
       select: {
         id: true,
         username: true,
+        name: true, // 🔥 ¡FALTABA ESTA LÍNEA! Por esto no veías tu nombre
         role: true,
         creatorProfile: true, 
         _count: {
