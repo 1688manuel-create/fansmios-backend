@@ -94,27 +94,38 @@ exports.updateProfile = async (req, res) => {
 
     console.log("💾 DATOS LISTOS PARA GUARDARSE EN LA BD:", profileData);
 
-    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (CÓDIGO DEFINITIVO 🛡️)
+    // 3. Atrapamos las IMÁGENES y las subimos a Cloudinary (BÁSICO Y DE HIERRO 🛡️)
     if (req.files) {
       
-      // Rastreador inteligente: Busca la foto sin importar cómo venga empaquetada
-      const getFilePath = (fileData) => {
-        if (!fileData) return null;
-        if (fileData.path) return fileData.path;
-        if (Array.isArray(fileData) && fileData.length > 0) return getFilePath(fileData);
-        return null;
-      };
+      // -- PROCESAR FOTO DE PERFIL --
+      let profileImagePath = null;
+      if (req.files.profileImage) {
+        // Verificamos si viene en una lista (Array) o como un objeto directo
+        if (Array.isArray(req.files.profileImage) && req.files.profileImage.length > 0) {
+          profileImagePath = req.files.profileImage.path;
+        } else if (req.files.profileImage.path) {
+          profileImagePath = req.files.profileImage.path;
+        }
+      }
 
-      const profileImagePath = getFilePath(req.files.profileImage);
       if (profileImagePath) {
-        console.log("📸 Subiendo nueva Foto de Perfil a Cloudinary...");
+        console.log("📸 Subiendo Foto de Perfil...");
         const result = await cloudinary.uploader.upload(profileImagePath, { folder: "fansmio_profiles" });
         profileData.profileImage = result.secure_url;
       }
 
-      const coverImagePath = getFilePath(req.files.coverImage);
+      // -- PROCESAR FOTO DE PORTADA --
+      let coverImagePath = null;
+      if (req.files.coverImage) {
+        if (Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
+          coverImagePath = req.files.coverImage.path;
+        } else if (req.files.coverImage.path) {
+          coverImagePath = req.files.coverImage.path;
+        }
+      }
+
       if (coverImagePath) {
-        console.log("🖼️ Subiendo nueva Foto de Portada a Cloudinary...");
+        console.log("🖼️ Subiendo Foto de Portada...");
         const result = await cloudinary.uploader.upload(coverImagePath, { folder: "fansmio_profiles" });
         profileData.coverImage = result.secure_url;
       }
