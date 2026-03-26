@@ -41,16 +41,19 @@ exports.getCreatorDashboard = async (req, res) => {
       // Sumar al día de hoy
       if (txDate >= startOfDay) dailyIncome += amount;
 
-      // Agrupar para el ranking de Top Fans
-      if (!topFansMap[tx.senderId]) {
-        topFansMap[tx.senderId] = {
-          id: tx.senderId,
-          username: tx.sender?.username || 'Usuario',
-          avatar: tx.sender?.username ? tx.sender.username[0].toUpperCase() : 'U',
-          spent: 0
-        };
+      // 🔥 FIX 1: FILTRO ANTI-ADMIN PARA BALLENAS
+      // Solo agregamos al usuario si NO es Administrador
+      if (tx.sender && tx.sender.role !== 'ADMIN') {
+        if (!topFansMap[tx.senderId]) {
+          topFansMap[tx.senderId] = {
+            id: tx.senderId,
+            username: tx.sender.username || 'Usuario',
+            avatar: tx.sender.username ? tx.sender.username.toUpperCase() : 'U',
+            spent: 0
+          };
+        }
+        topFansMap[tx.senderId].spent += amount;
       }
-      topFansMap[tx.senderId].spent += amount;
     });
 
     // Ordenar los Top Fans de mayor a menor gasto y tomar los top 5
@@ -59,9 +62,18 @@ exports.getCreatorDashboard = async (req, res) => {
       .slice(0, 5);
 
     // ==========================================
-    // 🔥 B. IMPACTO SOCIAL (Posts, Likes, Comentarios y VISTAS DE HISTORIAS)
+    // 🔥 B. IMPACTO SOCIAL (Posts, Likes, Comentarios, VISTAS y FANS)
     // ==========================================
     
+    // 🔥 FIX 2: CONTEO REAL DE FANS ACTIVOS (Anti-Clones)
+    // Buscamos a los usuarios únicos que tienen una suscripción activa
+    const uniqueActiveSubscribers = await prisma.subscription.findMany({
+      where: { creatorId: creatorId, status: 'ACTIVE' },
+      distinct: ['userId'],
+      select: { userId: true }
+    });
+    const realActiveFansCount = uniqueActiveSubscribers.length;
+
     // Contamos Posts, Likes y Comentarios
     const posts = await prisma.post.findMany({
       where: { userId: creatorId }, // En tu schema, el post usa 'userId'
@@ -72,7 +84,7 @@ exports.getCreatorDashboard = async (req, res) => {
     const totalLikes = posts.reduce((sum, post) => sum + post._count.likes, 0);
     const totalComments = posts.reduce((sum, post) => sum + post._count.comments, 0);
 
-    // Contamos las vistas de tus historias (¡Vi que tenías la tabla StoryView!)
+    // Contamos las vistas de tus historias
     const stories = await prisma.story.findMany({
       where: { creatorId: creatorId },
       include: { _count: { select: { views: true } } }
@@ -90,9 +102,9 @@ exports.getCreatorDashboard = async (req, res) => {
         churnRate: "N/A"         // Dato estético temporal hasta tener suscripciones
       },
       socialStats: {
-        activeVIPs: topFans.length, // El número real de ballenas
+        activeVIPs: realActiveFansCount, // 🔥 AHORA MUESTRA EL NÚMERO REAL
         totalLikes,
-        storyViews: totalStoryViews, // ¡Ahora es real!
+        storyViews: totalStoryViews, 
         comments: totalComments,
         posts: totalPosts
       },
