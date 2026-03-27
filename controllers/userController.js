@@ -38,29 +38,28 @@ exports.becomeCreator = async (req, res) => {
 };
 
 // ==========================================
-// 2. CREADOR (Y ADMIN): Editar Perfil Público (ACTUALIZACIÓN PARCIAL DINÁMICA 🛡️)
+// 2. CREADOR (Y ADMIN): Editar Perfil Público (BASE64 + FIX REAL)
 // ==========================================
 exports.updateProfile = async (req, res) => {
   try {
-    // 1. EXTRAER DATOS DEL FRONTEND
+    // ☢️ EXTRAEMOS LAS IMÁGENES BASE64 DEL PAQUETE
     const { 
       username, name, bio, monthlyPrice, category, welcomeMessage, 
       hideStats, blockedCountries, instagram, twitter, website,
-      targetUserId: bodyTargetUserId 
+      targetUserId: bodyTargetUserId,
+      profileImageBase64, coverImageBase64 
     } = req.body;
 
-    // 2. DEFINIR EL OBJETIVO (ADMIN O PROPIO)
     const targetUserId = (req.user.role === 'ADMIN' && bodyTargetUserId) 
                           ? bodyTargetUserId 
                           : req.user.userId;
 
     console.log("====================================");
-    console.log("📥 DATOS RECIBIDOS DESDE EL FRONTEND:", req.body);
-    console.log("🧠 [RADAR] targetUserId a editar:", targetUserId);
-    console.log("🧠 [RADAR] Mi propio userId es:", req.user.userId);
+    console.log("📥 DATOS RECIBIDOS DESDE EL FRONTEND");
+    console.log("🧠 targetUserId a editar:", targetUserId);
     console.log("====================================");
 
-    // 3. ACTUALIZAR TABLA PRINCIPAL (USER)
+    // 1. ACTUALIZAR TABLA PRINCIPAL (USER)
     const userUpdateData = {};
     if (name !== undefined) userUpdateData.name = name;
     
@@ -80,7 +79,7 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    // 4. PREPARAR DATOS DEL PERFIL (CONSTRUCCIÓN DINÁMICA EVITA-BORRADOS 🛡️)
+    // 2. PREPARAR DATOS DEL PERFIL (CONSTRUCCIÓN DINÁMICA)
     const profileData = {};
 
     if (bio !== undefined) profileData.bio = bio;
@@ -93,32 +92,28 @@ exports.updateProfile = async (req, res) => {
     if (twitter !== undefined) profileData.twitter = twitter;
     if (website !== undefined) profileData.website = website;
 
-    // 5. PROCESAR IMÁGENES DE CLOUDINARY (EXTRACTOR INTELIGENTE)
-    if (req.files) {
-      const extractPath = (fileField) => {
-        if (!fileField) return null;
-        const file = Array.isArray(fileField) ? fileField : fileField;
-        return file.path || file.tempFilePath || file.filepath || null;
-      };
-
-      try {
-        const pathPerfil = extractPath(req.files.profileImage);
-        if (pathPerfil) {
-          const resultPerfil = await cloudinary.uploader.upload(pathPerfil, { folder: "fansmio_profiles" });
-          profileData.profileImage = resultPerfil.secure_url;
-        }
-
-        const pathPortada = extractPath(req.files.coverImage);
-        if (pathPortada) {
-          const resultPortada = await cloudinary.uploader.upload(pathPortada, { folder: "fansmio_profiles" });
-          profileData.coverImage = resultPortada.secure_url;
-        }
-      } catch (cloudError) {
-        console.error("🚨 ERROR DE NUBE (Cloudinary):", cloudError);
-      }
+    // ==========================
+    // 3. PROCESAMIENTO DE IMÁGENES BASE64 ☢️
+    // ==========================
+    if (profileImageBase64) {
+      console.log("📸 Procesando Foto de Perfil en texto Base64...");
+      const result = await cloudinary.uploader.upload(profileImageBase64, { 
+        folder: "fansmio_profiles",
+        resource_type: "auto"
+      });
+      profileData.profileImage = result.secure_url;
     }
 
-    // 6. UPSERT BLINDADO
+    if (coverImageBase64) {
+      console.log("🖼️ Procesando Foto de Portada en texto Base64...");
+      const result = await cloudinary.uploader.upload(coverImageBase64, { 
+        folder: "fansmio_profiles",
+        resource_type: "auto"
+      });
+      profileData.coverImage = result.secure_url;
+    }
+
+    // 4. UPSERT BLINDADO
     const updatedProfile = await prisma.creatorProfile.upsert({
       where: { userId: targetUserId },
       update: profileData,
@@ -128,7 +123,7 @@ exports.updateProfile = async (req, res) => {
       }
     });
 
-    console.log("✅ PERFIL GUARDADO EXITOSAMENTE:", updatedProfile);
+    console.log("✅ PERFIL GUARDADO EXITOSAMENTE:", updatedProfile.id);
 
     res.status(200).json({ message: 'Perfil actualizado exitosamente', profile: updatedProfile });
 
