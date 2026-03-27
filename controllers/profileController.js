@@ -3,6 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const geoip = require('geoip-lite'); // 🌍 NUESTRA LIBRERÍA DE RASTREO IP
 const cloudinary = require('cloudinary').v2; // ☁️ NUBE PARA LAS IMÁGENES
+const fs = require('fs'); // 🧹 LIMPIEZA DE ARCHIVOS TEMPORALES
 
 // ==========================================
 // 1. OBTENER EL PERFIL DEL USUARIO (Privado - BLINDADO 🛡️)
@@ -52,7 +53,11 @@ exports.updateProfile = async (req, res) => {
                           ? req.body.targetUserId 
                           : req.user.userId;
 
-    const { username, bio, monthlyPrice, category, welcomeMessage, hideStats, blockedCountries, instagram, twitter, website } = req.body; 
+    const { username, name, bio, monthlyPrice, category, welcomeMessage, hideStats, blockedCountries, instagram, twitter, website } = req.body; 
+
+    // ACTUALIZAR TABLA PRINCIPAL (USER)
+    const userUpdateData = {};
+    if (name !== undefined) userUpdateData.name = name;
 
     // Verificación y actualización de Username
     if (username) {
@@ -61,52 +66,41 @@ exports.updateProfile = async (req, res) => {
       if (existingUser && existingUser.id !== targetUserId) {
         return res.status(400).json({ error: 'Ese nombre de usuario ya está en uso.' });
       }
+      userUpdateData.username = cleanUsername;
+    }
+
+    if (Object.keys(userUpdateData).length > 0) {
       await prisma.user.update({
         where: { id: targetUserId },
-        data: { username: cleanUsername } 
+        data: userUpdateData
       });
     }
 
-    // Preparamos el paquete de datos del perfil
-    const profileData = {
-      bio: bio || null,
-      monthlyPrice: monthlyPrice ? parseFloat(monthlyPrice) : 0,
-      category: category || 'General',
-      welcomeMessage: welcomeMessage || null,
-      hideStats: hideStats === 'true' || hideStats === true,
-      blockedCountries: blockedCountries || null,
-      instagram: instagram || null,
-      twitter: twitter || null,
-      website: website || null
-    };
+    // PREPARAR DATOS DEL PERFIL (ACTUALIZACIÓN PARCIAL SIN BORRADOS ACCIDENTALES)
+    const profileData = {};
+    if (bio !== undefined) profileData.bio = bio;
+    if (monthlyPrice !== undefined) profileData.monthlyPrice = parseFloat(monthlyPrice);
+    if (category !== undefined) profileData.category = category;
+    if (welcomeMessage !== undefined) profileData.welcomeMessage = welcomeMessage;
+    if (hideStats !== undefined) profileData.hideStats = hideStats === 'true' || hideStats === true;
+    if (blockedCountries !== undefined) profileData.blockedCountries = blockedCountries;
+    if (instagram !== undefined) profileData.instagram = instagram;
+    if (twitter !== undefined) profileData.twitter = twitter;
+    if (website !== undefined) profileData.website = website;
 
-    // PROCESAMIENTO DE IMÁGENES (Blindado contra bucles)
-    if (req.files) {
-      let profileImagePath = null;
-      if (req.files.profileImage) {
-        if (Array.isArray(req.files.profileImage) && req.files.profileImage.length > 0) {
-          profileImagePath = req.files.profileImage.path;
-        } else if (req.files.profileImage.path) {
-          profileImagePath = req.files.profileImage.path;
-        }
-      }
-      if (profileImagePath) {
-        const result = await cloudinary.uploader.upload(profileImagePath, { folder: "fansmio_profiles" });
-        profileData.profileImage = result.secure_url;
-      }
+    // PROCESAMIENTO DE IMÁGENES (FIX REAL Y LIMPIEZA)
+    if (req.files?.profileImage?.[0]) {
+      const profileImagePath = req.files.profileImage[0].path;
+      const result = await cloudinary.uploader.upload(profileImagePath, { folder: "fansmio_profiles" });
+      profileData.profileImage = result.secure_url;
+      fs.unlinkSync(profileImagePath);
+    }
 
-      let coverImagePath = null;
-      if (req.files.coverImage) {
-        if (Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
-          coverImagePath = req.files.coverImage.path;
-        } else if (req.files.coverImage.path) {
-          coverImagePath = req.files.coverImage.path;
-        }
-      }
-      if (coverImagePath) {
-        const result = await cloudinary.uploader.upload(coverImagePath, { folder: "fansmio_profiles" });
-        profileData.coverImage = result.secure_url;
-      }
+    if (req.files?.coverImage?.[0]) {
+      const coverImagePath = req.files.coverImage[0].path;
+      const result = await cloudinary.uploader.upload(coverImagePath, { folder: "fansmio_profiles" });
+      profileData.coverImage = result.secure_url;
+      fs.unlinkSync(coverImagePath);
     }
 
     // UPSERT: Si existe lo actualiza, si es Admin/Nuevo lo crea
@@ -139,7 +133,7 @@ exports.getPublicProfile = async (req, res) => {
       select: {
         id: true,
         username: true,
-        name: true, // 🔥 ¡FALTABA ESTA LÍNEA! Por esto no veías tu nombre
+        name: true, // 🔥 Permiso para enviar el nombre al Frontend
         role: true,
         creatorProfile: true, 
         _count: {
@@ -155,8 +149,9 @@ exports.getPublicProfile = async (req, res) => {
 
     // 🌍 INICIO DEL ESCUDO DE FRONTERA (GEO-BLOCKING)
     if (user.creatorProfile && user.creatorProfile.blockedCountries) {
-      // Obtenemos la IP real del visitante
-      const clientIp = (req.headers['x-forwarded-for'] || '').split(',').trim() || req.socket.remoteAddress;
+      // Obtenemos la IP real del visitante (Fix de seguridad para múltiples IPs)
+      const rawIps = req.headers['x-forwarded-for'] || '';
+      const clientIp = rawIps.split(',').trim() || req.socket.remoteAddress;
       
       // Consultamos el país de esa IP
       const geo = geoip.lookup(clientIp);
