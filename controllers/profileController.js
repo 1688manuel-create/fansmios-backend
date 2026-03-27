@@ -3,7 +3,6 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const geoip = require('geoip-lite'); // 🌍 NUESTRA LIBRERÍA DE RASTREO IP
 const cloudinary = require('cloudinary').v2; // ☁️ NUBE PARA LAS IMÁGENES
-const fs = require('fs'); // 🧹 LIMPIEZA DE ARCHIVOS TEMPORALES
 
 // ==========================================
 // 1. OBTENER EL PERFIL DEL USUARIO (Privado - BLINDADO 🛡️)
@@ -44,7 +43,7 @@ exports.getProfile = async (req, res) => {
 };
 
 // ==========================================
-// 2. ACTUALIZAR EL PERFIL PÚBLICO (HIERRO MACIZO + UPSERT 🛡️)
+// 2. ACTUALIZAR EL PERFIL PÚBLICO (BASE 64 + UPSERT 🛡️)
 // ==========================================
 exports.updateProfile = async (req, res) => {
   try {
@@ -53,7 +52,11 @@ exports.updateProfile = async (req, res) => {
                           ? req.body.targetUserId 
                           : req.user.userId;
 
-    const { username, name, bio, monthlyPrice, category, welcomeMessage, hideStats, blockedCountries, instagram, twitter, website } = req.body; 
+    const { 
+      username, name, bio, monthlyPrice, category, welcomeMessage, 
+      hideStats, blockedCountries, instagram, twitter, website,
+      profileImageBase64, coverImageBase64 
+    } = req.body; 
 
     // ACTUALIZAR TABLA PRINCIPAL (USER)
     const userUpdateData = {};
@@ -76,7 +79,7 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    // PREPARAR DATOS DEL PERFIL (ACTUALIZACIÓN PARCIAL SIN BORRADOS ACCIDENTALES)
+    // PREPARAR DATOS DEL PERFIL
     const profileData = {};
     if (bio !== undefined) profileData.bio = bio;
     if (monthlyPrice !== undefined) profileData.monthlyPrice = parseFloat(monthlyPrice);
@@ -88,22 +91,24 @@ exports.updateProfile = async (req, res) => {
     if (twitter !== undefined) profileData.twitter = twitter;
     if (website !== undefined) profileData.website = website;
 
-    // PROCESAMIENTO DE IMÁGENES (FIX REAL Y LIMPIEZA)
-    if (req.files?.profileImage?.[0]) {
-      const profileImagePath = req.files.profileImage[0].path;
-      const result = await cloudinary.uploader.upload(profileImagePath, { folder: "fansmio_profiles" });
+    // ☢️ PROCESAMIENTO DE IMÁGENES VIA BASE64 (BYPASS DEFINITIVO)
+    if (profileImageBase64) {
+      console.log("📸 Procesando Foto de Perfil en texto Base64...");
+      const result = await cloudinary.uploader.upload(profileImageBase64, { 
+        folder: "fansmio_profiles" 
+      });
       profileData.profileImage = result.secure_url;
-      fs.unlinkSync(profileImagePath);
     }
 
-    if (req.files?.coverImage?.[0]) {
-      const coverImagePath = req.files.coverImage[0].path;
-      const result = await cloudinary.uploader.upload(coverImagePath, { folder: "fansmio_profiles" });
+    if (coverImageBase64) {
+      console.log("🖼️ Procesando Foto de Portada en texto Base64...");
+      const result = await cloudinary.uploader.upload(coverImageBase64, { 
+        folder: "fansmio_profiles" 
+      });
       profileData.coverImage = result.secure_url;
-      fs.unlinkSync(coverImagePath);
     }
 
-    // UPSERT: Si existe lo actualiza, si es Admin/Nuevo lo crea
+    // UPSERT CORREGIDO: Si existe lo actualiza, si es Admin/Nuevo lo crea
     const updatedProfile = await prisma.creatorProfile.upsert({
       where: { userId: targetUserId },
       update: profileData,
@@ -133,7 +138,7 @@ exports.getPublicProfile = async (req, res) => {
       select: {
         id: true,
         username: true,
-        name: true, // 🔥 Permiso para enviar el nombre al Frontend
+        name: true, 
         role: true,
         creatorProfile: true, 
         _count: {
@@ -149,9 +154,9 @@ exports.getPublicProfile = async (req, res) => {
 
     // 🌍 INICIO DEL ESCUDO DE FRONTERA (GEO-BLOCKING)
     if (user.creatorProfile && user.creatorProfile.blockedCountries) {
-      // Obtenemos la IP real del visitante (Fix de seguridad para múltiples IPs)
+      // FIX de seguridad: Evitar error si hay proxy múltiple
       const rawIps = req.headers['x-forwarded-for'] || '';
-      const clientIp = rawIps.split(',').trim() || req.socket.remoteAddress;
+      const clientIp = rawIps ? rawIps.split(',').trim() : req.socket.remoteAddress;
       
       // Consultamos el país de esa IP
       const geo = geoip.lookup(clientIp);
