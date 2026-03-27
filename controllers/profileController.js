@@ -95,7 +95,9 @@ exports.updateProfile = async (req, res) => {
     if (profileImageBase64) {
       console.log("📸 Procesando Foto de Perfil en texto Base64...");
       const result = await cloudinary.uploader.upload(profileImageBase64, { 
-        folder: "fansmio_profiles" 
+        folder: "fansmio_profiles",
+        // 🔥 ESTE ES EL AVISO PARA CLOUDINARY: Le decimos que lo procese como archivo
+        resource_type: "auto" 
       });
       profileData.profileImage = result.secure_url;
     }
@@ -103,7 +105,9 @@ exports.updateProfile = async (req, res) => {
     if (coverImageBase64) {
       console.log("🖼️ Procesando Foto de Portada en texto Base64...");
       const result = await cloudinary.uploader.upload(coverImageBase64, { 
-        folder: "fansmio_profiles" 
+        folder: "fansmio_profiles",
+        // 🔥 ESTE ES EL AVISO PARA CLOUDINARY
+        resource_type: "auto" 
       });
       profileData.coverImage = result.secure_url;
     }
