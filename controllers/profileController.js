@@ -160,7 +160,7 @@ exports.getPublicProfile = async (req, res) => {
     if (user.creatorProfile && user.creatorProfile.blockedCountries) {
       // FIX de seguridad: Evitar error si hay proxy múltiple
       const rawIps = req.headers['x-forwarded-for'] || '';
-      const clientIp = rawIps ? rawIps.split(',').trim() : req.socket.remoteAddress;
+      const clientIp = rawIps ? rawIps.split(',')[0].trim() : req.socket.remoteAddress;
       
       // Consultamos el país de esa IP
       const geo = geoip.lookup(clientIp);
