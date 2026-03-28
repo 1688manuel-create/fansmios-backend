@@ -1,24 +1,37 @@
 // backend/controllers/storyController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const cloudinary = require('cloudinary').v2; // 🔥 NUEVO: Importamos el motor de la nube
 
-// 1. CREAR HISTORIA
+// 1. CREAR HISTORIA (CON CLOUDINARY)
 exports.createStory = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const mediaUrl = req.file ? `/uploads/${req.file.filename}` : null;
-    if (!mediaUrl) return res.status(400).json({ error: 'Debes subir un archivo.' });
+    
+    // Validamos que haya archivo físico (req.file)
+    if (!req.file) return res.status(400).json({ error: 'Debes subir un archivo.' });
 
-    // 🔥 NUEVO: Capturamos el texto que mande el frontend
+    // 🔥 LA MAGIA DE CLOUDINARY: Subimos el archivo a la nube en lugar de guardarlo local
+    console.log("📸 Subiendo Historia a Cloudinary...");
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "fansmio_stories",
+      resource_type: "auto" // Auto detecta si es foto o video
+    });
+
+    const mediaUrl = result.secure_url; // Usamos el enlace seguro (HTTPS)
     const { caption } = req.body; 
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    
     const newStory = await prisma.story.create({
-      // 🔥 NUEVO: Lo guardamos en la base de datos
       data: { creatorId: userId, mediaUrl, expiresAt, caption } 
     });
-    res.status(201).json({ message: 'Historia creada', story: newStory });
-  } catch (error) { res.status(500).json({ error: 'Error al crear historia.' }); }
+    
+    res.status(201).json({ message: 'Historia creada exitosamente', story: newStory });
+  } catch (error) { 
+    console.error("Error al subir historia:", error);
+    res.status(500).json({ error: 'Error al crear historia.' }); 
+  }
 };
 
 // 2. OBTENER HISTORIAS DEL FEED
