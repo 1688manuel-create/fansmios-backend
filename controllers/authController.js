@@ -140,7 +140,8 @@ exports.login = async (req, res) => {
       });
     }
 
-    const accessToken = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    // 🔥 CAMBIO DE '15m' a '7d' (7 DÍAS DE BATERÍA PARA LA SESIÓN)
+    const accessToken = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
     const refreshToken = jwt.sign({ userId: user.id, jti: crypto.randomUUID() }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
 
     const deviceInfo = req.headers['user-agent'] || 'Dispositivo Desconocido';

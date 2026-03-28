@@ -1,3 +1,4 @@
+// backend/controllers/paymentController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const crypto = require('crypto');
@@ -59,8 +60,23 @@ exports.createPaymentIntent = async (req, res) => {
     
     // TRANSACCIÓN ATÓMICA
     await prisma.$transaction(async (db) => {
+      // 🔥 BLINDAJE: Capturamos el ID del mensaje sin importar cómo lo llame el Frontend
+      const targetMessageId = messageId || attachedMessage;
+
       const tx = await db.transaction.create({
-        data: { senderId: fanId, receiverId: creatorId, type: type, status: 'COMPLETED', amount: finalAmount, platformFee, netAmount, postId, bundleId, attachedMessage: messageId || attachedMessage, payramReceiptId }
+        data: { 
+          senderId: fanId, 
+          receiverId: creatorId, 
+          type: type, 
+          status: 'COMPLETED', 
+          amount: finalAmount, 
+          platformFee, 
+          netAmount, 
+          postId, 
+          bundleId, 
+          attachedMessage: targetMessageId, 
+          payramReceiptId 
+        }
       });
 
       await db.wallet.upsert({
@@ -89,8 +105,24 @@ exports.createPaymentIntent = async (req, res) => {
         notificationType = 'PPV_SALE';
 
       } else if (type === 'PPV_MESSAGE') {
-        await db.messagePurchase.create({ data: { fanId, messageId: attachedMessage, pricePaid: finalAmount } });
-        await db.message.update({ where: { id: attachedMessage }, data: { isUnlocked: true } });
+        // 🔥 CORRECCIÓN CRÍTICA DE PRISMA: Sintaxis estricta 'connect' para el Chat
+        if (!targetMessageId) {
+          throw new Error("El sistema no recibió el ID del mensaje a desbloquear.");
+        }
+
+        await db.messagePurchase.create({ 
+          data: { 
+            pricePaid: finalAmount,
+            fan: { connect: { id: fanId } },
+            message: { connect: { id: targetMessageId } }
+          } 
+        });
+        
+        await db.message.update({ 
+          where: { id: targetMessageId }, 
+          data: { isUnlocked: true } 
+        });
+        
         notificationMessage = `@${fan.username} desbloqueó tu mensaje privado por $${finalAmount}. 💌`;
         notificationType = 'MESSAGE_SALE';
 
@@ -103,7 +135,6 @@ exports.createPaymentIntent = async (req, res) => {
         notificationType = 'BUNDLE_SALE';
 
       } else if (type === 'TIP') {
-        // En TIPS guardamos el mensaje en attachedMessage
         notificationMessage = `@${fan.username} te ha enviado una propina de $${finalAmount}! 💸 "${description || '¡Gracias!'}"`;
         notificationType = 'TIP';
       }
@@ -125,7 +156,8 @@ exports.createPaymentIntent = async (req, res) => {
 
   } catch (error) {
     console.error("Error PayRam:", error);
-    res.status(500).json({ error: 'Error en el motor de pagos interno.' });
+    // 🔥 Devolvemos el mensaje de error real para depuración si algo más falla
+    res.status(500).json({ error: error.message || 'Error en el motor de pagos interno.' });
   }
 };
 
