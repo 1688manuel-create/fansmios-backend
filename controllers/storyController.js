@@ -56,7 +56,11 @@ exports.getFeedStories = async (req, res) => {
       : { creatorId: { in: creatorIds }, expiresAt: { gt: new Date() } };
 
     const stories = await prisma.story.findMany({
-      where: whereClause,
+      where: {
+        ...whereClause,
+        // 🔥 ESCUDO ANTI-FANTASMAS: Filtramos para que solo muestre las nuevas que están en la nube
+        mediaUrl: { contains: 'cloudinary' } 
+      },
       include: {
         creator: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } } } },
         _count: { select: { views: true } }
