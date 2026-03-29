@@ -125,6 +125,16 @@ exports.createPaymentIntent = async (req, res) => {
           update: { pendingBalance: { increment: netAmount } },
           create: { userId: creatorId, pendingBalance: netAmount }
         });
+        // 🔴 DESCONTAR EL DINERO DE LA BÓVEDA DEL FAN
+        const fanWallet = await db.wallet.findUnique({ where: { userId: fanId } });
+        if (!fanWallet || fanWallet.balance < finalAmount) {
+          throw new Error("Saldo insuficiente en tu Bóveda de FansMio.");
+        }
+        
+        await db.wallet.update({
+          where: { userId: fanId },
+          data: { balance: { decrement: finalAmount } }
+        });
 
         let notificationMessage = '';
         let notificationType = 'MONEY';
