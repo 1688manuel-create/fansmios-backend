@@ -157,13 +157,16 @@ exports.getAllUsers = async (req, res) => {
 };
 
 // ==========================================
-// 4. OBTENER PERFIL DEL USUARIO (Blindado 🛡️)
+// 4. OBTENER PERFIL DEL USUARIO (Blindado 🛡️ + Bóveda 💰)
 // ==========================================
 exports.getProfile = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.userId },
-      include: { creatorProfile: true }
+      include: { 
+        creatorProfile: true,
+        wallet: true // 👈 ¡NUEVO! Le ordenamos a Prisma que traiga la Bóveda
+      }
     });
 
     if (!user) {
@@ -186,6 +189,9 @@ exports.getProfile = async (req, res) => {
         coverImage: null
       };
     }
+
+    // 💰 ¡NUEVO! Empaquetamos el saldo de la bóveda para que el Frontend lo entienda fácil
+    user.walletBalance = user.wallet?.balance || 0;
 
     res.status(200).json({ user });
   } catch (error) {
