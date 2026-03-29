@@ -45,6 +45,7 @@ enum TransactionType {
   LIVE_TICKET 
   PAYOUT 
   PROMOTION
+  CREDIT_TOPUP // 👈 ¡NUEVO! Añade esta línea
 }
 
 enum TransactionStatus {
