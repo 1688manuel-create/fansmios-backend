@@ -6,7 +6,7 @@ const { sendNotificationEmail } = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushService');
 
 // ==========================================
-// 🏦 MOTOR PAYRAM: PROCESADOR INSTANTÁNEO
+// 🏦 MOTOR COVRA PAY: PROCESADOR INSTANTÁNEO
 // ==========================================
 
 exports.createPaymentIntent = async (req, res) => {
@@ -47,8 +47,10 @@ exports.createPaymentIntent = async (req, res) => {
       feePercent = settings.feeSubscription / 100;
     } else if (type === 'TIP') {
       feePercent = settings.feeTips / 100;
+    } else if (type === 'CREDIT_TOPUP') {
+      feePercent = 0; // 👈 Las recargas no cobran comisión al fan (o puedes ponerle un fee si gustas)
     } else {
-      feePercent = settings.feePPV / 100; // Para POSTS, BUNDLES y MENSAJES
+      feePercent = settings.feePPV / 100; 
     }
 
     const platformFee = finalAmount * feePercent; 
@@ -60,103 +62,139 @@ exports.createPaymentIntent = async (req, res) => {
     
     // TRANSACCIÓN ATÓMICA
     await prisma.$transaction(async (db) => {
-      // 🔥 BLINDAJE: Capturamos el ID del mensaje sin importar cómo lo llame el Frontend
-      const targetMessageId = messageId || attachedMessage;
-
-      const tx = await db.transaction.create({
-        data: { 
-          senderId: fanId, 
-          receiverId: creatorId, 
-          type: type, 
-          status: 'COMPLETED', 
-          amount: finalAmount, 
-          platformFee, 
-          netAmount, 
-          postId, 
-          bundleId, 
-          attachedMessage: targetMessageId, 
-          payramReceiptId 
-        }
-      });
-
-      await db.wallet.upsert({
-        where: { userId: creatorId },
-        update: { pendingBalance: { increment: netAmount } },
-        create: { userId: creatorId, pendingBalance: netAmount }
-      });
-
-      let notificationMessage = '';
-      let notificationType = 'MONEY';
-
-      if (type === 'SUBSCRIPTION') {
-        const endDate = new Date();
-        endDate.setDate(endDate.getDate() + 30);
-        await db.subscription.upsert({
-          where: { fanId_creatorId: { fanId, creatorId } },
-          update: { status: 'ACTIVE', endDate },
-          create: { fanId, creatorId, status: 'ACTIVE', price: finalAmount, endDate }
-        });
-        notificationMessage = `¡Nuevo Suscriptor! @${fan.username} se ha suscrito a tu perfil por $${finalAmount}. 🎉`;
-        notificationType = 'SUBSCRIPTION';
-
-      } else if (type === 'PPV_POST') {
-        await db.postPurchase.create({ data: { fanId, postId, pricePaid: finalAmount } });
-        notificationMessage = `@${fan.username} desbloqueó tu publicación PPV por $${finalAmount}. 🔓`;
-        notificationType = 'PPV_SALE';
-
-      } else if (type === 'PPV_MESSAGE') {
-        // 🔥 CORRECCIÓN CRÍTICA DE PRISMA: Sintaxis estricta 'connect' para el Chat
-        if (!targetMessageId) {
-          throw new Error("El sistema no recibió el ID del mensaje a desbloquear.");
-        }
-
-        await db.messagePurchase.create({ 
+      
+      // ==========================================
+      // 💳 RUTA 1: RECARGA DE BILLETERA DEL FAN
+      // ==========================================
+      if (type === 'CREDIT_TOPUP') {
+        
+        await db.transaction.create({
           data: { 
-            pricePaid: finalAmount,
-            fan: { connect: { id: fanId } },
-            message: { connect: { id: targetMessageId } }
-          } 
-        });
-        
-        await db.message.update({ 
-          where: { id: targetMessageId }, 
-          data: { isUnlocked: true } 
-        });
-        
-        notificationMessage = `@${fan.username} desbloqueó tu mensaje privado por $${finalAmount}. 💌`;
-        notificationType = 'MESSAGE_SALE';
-
-      } else if (type === 'BUNDLE') {
-        const bundle = await db.bundle.findUnique({ where: { id: bundleId }, include: { posts: true } });
-        await db.bundlePurchase.create({ data: { fanId, bundleId, pricePaid: finalAmount } });
-        const postPurchasesData = bundle.posts.map(p => ({ fanId, postId: p.id, pricePaid: 0 }));
-        await db.postPurchase.createMany({ data: postPurchasesData, skipDuplicates: true });
-        notificationMessage = `@${fan.username} compró tu paquete "${bundle.title}" por $${finalAmount}. 📦`;
-        notificationType = 'BUNDLE_SALE';
-
-      } else if (type === 'TIP') {
-        notificationMessage = `@${fan.username} te ha enviado una propina de $${finalAmount}! 💸 "${description || '¡Gracias!'}"`;
-        notificationType = 'TIP';
-      }
-
-      // 🔔 DISPARAR NOTIFICACIÓN AL CREADOR SIEMPRE QUE HAYA DINERO
-      if (creatorId !== fanId) {
-        await db.notification.create({
-          data: {
-            userId: creatorId,
-            type: notificationType,
-            content: notificationMessage,
-            link: '/dashboard/wallet' // Lo mandamos a su billetera para que vea el dinero
+            senderId: fanId, 
+            receiverId: fanId, // El receptor es él mismo
+            type: 'CREDIT_TOPUP', 
+            status: 'COMPLETED', 
+            amount: finalAmount, 
+            platformFee, 
+            netAmount, 
+            payramReceiptId 
           }
         });
+
+        // 🟢 Sube el dinero al BALANCE DISPONIBLE (listo para gastar)
+        await db.wallet.upsert({
+          where: { userId: fanId },
+          update: { balance: { increment: finalAmount } },
+          create: { userId: fanId, balance: finalAmount }
+        });
+
+        await db.notification.create({
+          data: {
+            userId: fanId,
+            type: 'SYSTEM',
+            content: `Has recargado $${finalAmount} USD a tu billetera con éxito. ⚡`,
+            link: '/dashboard'
+          }
+        });
+
+      } else {
+        // ==========================================
+        // 🛍️ RUTA 2: PAGOS A CREADORES (PPV, Tips, Subs)
+        // ==========================================
+        const targetMessageId = messageId || attachedMessage;
+
+        await db.transaction.create({
+          data: { 
+            senderId: fanId, 
+            receiverId: creatorId, 
+            type: type, 
+            status: 'COMPLETED', 
+            amount: finalAmount, 
+            platformFee, 
+            netAmount, 
+            postId, 
+            bundleId, 
+            attachedMessage: targetMessageId, 
+            payramReceiptId 
+          }
+        });
+
+        // 🟡 El dinero va a PENDING BALANCE (cuarentena)
+        await db.wallet.upsert({
+          where: { userId: creatorId },
+          update: { pendingBalance: { increment: netAmount } },
+          create: { userId: creatorId, pendingBalance: netAmount }
+        });
+
+        let notificationMessage = '';
+        let notificationType = 'MONEY';
+
+        if (type === 'SUBSCRIPTION') {
+          const endDate = new Date();
+          endDate.setDate(endDate.getDate() + 30);
+          await db.subscription.upsert({
+            where: { fanId_creatorId: { fanId, creatorId } },
+            update: { status: 'ACTIVE', endDate },
+            create: { fanId, creatorId, status: 'ACTIVE', price: finalAmount, endDate }
+          });
+          notificationMessage = `¡Nuevo Suscriptor! @${fan.username} se ha suscrito a tu perfil por $${finalAmount}. 🎉`;
+          notificationType = 'SUBSCRIPTION';
+
+        } else if (type === 'PPV_POST') {
+          await db.postPurchase.create({ data: { fanId, postId, pricePaid: finalAmount } });
+          notificationMessage = `@${fan.username} desbloqueó tu publicación PPV por $${finalAmount}. 🔓`;
+          notificationType = 'PPV_SALE';
+
+        } else if (type === 'PPV_MESSAGE') {
+          if (!targetMessageId) throw new Error("El sistema no recibió el ID del mensaje a desbloquear.");
+          await db.messagePurchase.create({ 
+            data: { 
+              pricePaid: finalAmount,
+              fan: { connect: { id: fanId } },
+              message: { connect: { id: targetMessageId } }
+            } 
+          });
+          await db.message.update({ where: { id: targetMessageId }, data: { isUnlocked: true } });
+          notificationMessage = `@${fan.username} desbloqueó tu mensaje privado por $${finalAmount}. 💌`;
+          notificationType = 'MESSAGE_SALE';
+
+        } else if (type === 'BUNDLE') {
+          const bundle = await db.bundle.findUnique({ where: { id: bundleId }, include: { posts: true } });
+          await db.bundlePurchase.create({ data: { fanId, bundleId, pricePaid: finalAmount } });
+          const postPurchasesData = bundle.posts.map(p => ({ fanId, postId: p.id, pricePaid: 0 }));
+          await db.postPurchase.createMany({ data: postPurchasesData, skipDuplicates: true });
+          notificationMessage = `@${fan.username} compró tu paquete "${bundle.title}" por $${finalAmount}. 📦`;
+          notificationType = 'BUNDLE_SALE';
+
+        } else if (type === 'TIP') {
+          notificationMessage = `@${fan.username} te ha enviado una propina de $${finalAmount}! 💸 "${description || '¡Gracias!'}"`;
+          notificationType = 'TIP';
+        }
+
+        // Notificar al Creador
+        if (creatorId !== fanId) {
+          await db.notification.create({
+            data: {
+              userId: creatorId,
+              type: notificationType,
+              content: notificationMessage,
+              link: '/dashboard/wallet'
+            }
+          });
+        }
       }
     });
 
-    res.status(200).json({ success: true, message: 'Procesado por PayRam', receipt: payramReceiptId });
+    // 🚀 RESPUESTA AL FRONTEND: Le enviamos un checkoutUrl simulado para que recargue la página si es un TopUp.
+    res.status(200).json({ 
+      success: true, 
+      message: 'Procesado por PayRam', 
+      receipt: payramReceiptId,
+      checkoutUrl: type === 'CREDIT_TOPUP' ? '/dashboard' : undefined 
+    });
 
   } catch (error) {
     console.error("Error PayRam:", error);
-    // 🔥 Devolvemos el mensaje de error real para depuración si algo más falla
     res.status(500).json({ error: error.message || 'Error en el motor de pagos interno.' });
   }
 };
