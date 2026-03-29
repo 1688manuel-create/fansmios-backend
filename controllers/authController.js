@@ -115,7 +115,10 @@ exports.login = async (req, res) => {
 
     const user = await prisma.user.findUnique({ 
       where: { email },
-      include: { creatorProfile: true } // Traemos el perfil para saber su estatus KYC
+      include: { 
+        creatorProfile: true,
+        wallet: true // 👈 ¡NUEVO! Traemos la bóveda del usuario
+      } 
     });
     
     if (!user) return res.status(401).json({ error: 'Credenciales inválidas' }); 
@@ -161,7 +164,8 @@ exports.login = async (req, res) => {
         name: user.name, 
         role: user.role, 
         username: user.username,
-        creatorProfile: user.creatorProfile // Enviamos el perfil para que el Frontend evalúe si mandarlo al KYC
+        walletBalance: user.wallet?.balance || 0, // 👈 ¡NUEVO! Enviamos el saldo real o 0 si no tiene bóveda
+        creatorProfile: user.creatorProfile 
       }
     });
 
