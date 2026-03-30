@@ -11,7 +11,7 @@ exports.getProfile = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    // 🔥 REPARACIÓN COVRA PAY: Le pedimos a Prisma que traiga el rol y el saldo de la billetera
+    // 🔥 REPARACIÓN PRISMA: Traemos la relación 'wallet' correcta
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -19,8 +19,8 @@ exports.getProfile = async (req, res) => {
         username: true,
         name: true,
         email: true,
-        role: true,             // 👈 IMPORTANTE para el Dashboard
-        walletBalance: true,    // 👈 IMPORTANTE para Covra Pay
+        role: true,
+        wallet: true, // 👈 EL CAMBIO CLAVE: Traemos la tabla billetera
         creatorProfile: true,
         isVerified: true,
         createdAt: true
@@ -28,6 +28,13 @@ exports.getProfile = async (req, res) => {
     });
 
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    // 🎯 ADAPTADOR COVRA PAY: Tu Frontend espera una variable llamada "walletBalance".
+    // Extraemos el balance de la bóveda y se lo pegamos al usuario directamente.
+    user.walletBalance = user.wallet ? (user.wallet.balance || 0) : 0;
+    
+    // (Opcional) Borramos el objeto wallet para no mandar datos duplicados
+    delete user.wallet;
 
     // 🛡️ ESCUDO ANTI-COLAPSO PARA ADMINS Y NUEVOS
     if (!user.creatorProfile) {
