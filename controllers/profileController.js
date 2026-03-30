@@ -11,9 +11,20 @@ exports.getProfile = async (req, res) => {
   try {
     const userId = req.user.userId;
 
+    // 🔥 REPARACIÓN COVRA PAY: Le pedimos a Prisma que traiga el rol y el saldo de la billetera
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { creatorProfile: true }
+      select: {
+        id: true,
+        username: true,
+        name: true,
+        email: true,
+        role: true,             // 👈 IMPORTANTE para el Dashboard
+        walletBalance: true,    // 👈 IMPORTANTE para Covra Pay
+        creatorProfile: true,
+        isVerified: true,
+        createdAt: true
+      }
     });
 
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
