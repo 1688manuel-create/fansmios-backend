@@ -186,15 +186,30 @@ exports.getWalletDashboard = async (req, res) => {
   try {
     const userId = req.user.userId;
     let wallet = await prisma.wallet.findUnique({ where: { userId } });
+    
     if (!wallet) {
       wallet = await prisma.wallet.create({ data: { userId, balance: 0, pendingBalance: 0 } });
     }
 
+    // 🔥 REPARACIÓN COVRA PAY: Modificamos la búsqueda para que traiga tanto 
+    // lo que recibes (Creador) como las recargas/gastos que haces (Fan).
     const recentTransactions = await prisma.transaction.findMany({
-      where: { receiverId: userId, status: 'COMPLETED' },
+      where: { 
+        OR: [
+          // Eres el receptor (Alguien te pagó o dio propina)
+          { receiverId: userId, status: 'COMPLETED' },
+          // O eres el emisor y es una recarga de saldo
+          { senderId: userId, type: 'CREDIT_TOPUP', status: 'COMPLETED' },
+          // O eres el emisor y gastaste dinero (opcional, para que el fan vea sus gastos)
+          { senderId: userId, status: 'COMPLETED' }
+        ]
+      },
       orderBy: { createdAt: 'desc' },
       take: 10,
-      include: { sender: { select: { username: true, email: true } } }
+      include: { 
+        sender: { select: { username: true, email: true } },
+        receiver: { select: { username: true } } // 👈 Añadido para saber a quién le pagaste
+      }
     });
 
     const withdrawalHistory = await prisma.withdrawal.findMany({
@@ -203,18 +218,28 @@ exports.getWalletDashboard = async (req, res) => {
       take: 10
     });
 
+    // Solo sumamos lo que el usuario ha RECIBIDO para el total histórico
     const totalEarnings = await prisma.transaction.aggregate({
       where: { receiverId: userId, status: 'COMPLETED' },
       _sum: { netAmount: true }
     });
 
+    // 🎯 ADAPTADOR PARA EL FRONTEND
+    // Marcamos cada transacción para que el frontend sepa si entró o salió dinero
+    const formattedTransactions = recentTransactions.map(tx => ({
+      ...tx,
+      // Es ingreso si tú eres el receptor, o si es una recarga a tu cuenta
+      isIncome: tx.receiverId === userId || tx.type === 'CREDIT_TOPUP'
+    }));
+
     res.status(200).json({
       wallet,
-      recentTransactions,
+      recentTransactions: formattedTransactions,
       withdrawalHistory,
       totalEarnedHistorial: totalEarnings._sum.netAmount || 0
     });
   } catch (error) {
+    console.error("Error en getWalletDashboard:", error);
     res.status(500).json({ error: 'Error interno al cargar los datos financieros.' });
   }
 };
