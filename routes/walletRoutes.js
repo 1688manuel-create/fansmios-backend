@@ -12,7 +12,10 @@ router.get('/balance', verifyToken, isCreator, walletController.getWalletBalance
 router.get('/history', verifyToken, isCreator, walletController.getTransactionHistory);
 router.post('/withdraw', verifyToken, isCreator, walletController.requestWithdrawal);
 router.get('/withdrawals', verifyToken, isCreator, walletController.getWithdrawalHistory);
-router.get('/dashboard', verifyToken, isCreator, walletController.getWalletDashboard);
+
+// 🔥 RUTA MAESTRA (Dashboard): ¡Sin 'isCreator' para que Fans y Creadores puedan ver su bóveda!
+router.get('/dashboard', verifyToken, walletController.getDashboard);
+
 router.put('/update-crypto', verifyToken, walletController.updateCryptoAddress);
 
 module.exports = router;
