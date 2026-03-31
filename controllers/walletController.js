@@ -70,13 +70,18 @@ exports.getTransactionHistory = async (req, res) => {
   }
 };
 
-// 🔥 3. SOLICITAR UN RETIRO (CORREGIDA CONTABILIDAD)
+// 🔥 SOLICITAR UN RETIRO 
 exports.requestWithdrawal = async (req, res) => {
   try {
     const creatorId = req.user.userId;
     let { amount, isExpress, twoFactorToken } = req.body; 
 
     isExpress = isExpress === true || isExpress === 'true';
+    const withdrawalAmount = parseFloat(amount); 
+    
+    if (!withdrawalAmount || withdrawalAmount < 50) {
+      return res.status(400).json({ error: 'El monto mínimo de retiro es de $50.00 USD.' });
+    }
 
     const user = await prisma.user.findUnique({ where: { id: creatorId } });
 
@@ -94,12 +99,6 @@ exports.requestWithdrawal = async (req, res) => {
     const profile = await prisma.creatorProfile.findUnique({ where: { userId: creatorId } });
     if (!profile || profile.kycStatus !== 'APPROVED') {
       return res.status(403).json({ error: '⚠️ Verificación Requerida: Tu identidad (KYC) debe estar aprobada por un administrador.' });
-    }
-
-    const withdrawalAmount = parseFloat(amount);
-    
-    if (!withdrawalAmount || withdrawalAmount < 50) {
-      return res.status(400).json({ error: 'El monto mínimo de retiro es de $50.00 USD.' });
     }
 
     if (!isExpress) {
@@ -120,15 +119,15 @@ exports.requestWithdrawal = async (req, res) => {
 
     const wallet = await prisma.wallet.findUnique({ where: { userId: creatorId } });
 
-    if (!wallet?.cryptoAddress || wallet.cryptoAddress.length < 10) {
-      return res.status(400).json({ error: 'Configura tu Billetera USDT (TRC20) antes de solicitar un retiro.' });
-    }
-
     if (!wallet || wallet.balance < withdrawalAmount) {
       return res.status(400).json({ error: 'No tienes saldo disponible suficiente.' });
     }
 
-    // 👑 CONSULTAR COMISIONES DE RETIRO (MODO DIOS)
+    if (!wallet.cryptoAddress || wallet.cryptoAddress.length < 10) {
+      return res.status(400).json({ error: 'Configura tu Billetera USDT (TRC20) antes de solicitar un retiro.' });
+    }
+
+    // 👑 CONSULTAR COMISIONES DE RETIRO
     const settings = await prisma.platformSettings.findFirst() || { feeWithdrawalExp: 5, feeWithdrawalStd: 2 };
     
     const feePercent = isExpress ? (settings.feeWithdrawalExp / 100) : (settings.feeWithdrawalStd / 100);
@@ -143,7 +142,7 @@ exports.requestWithdrawal = async (req, res) => {
         where: { userId: creatorId },
         data: { 
           balance: { decrement: withdrawalAmount },
-          pendingBalance: { increment: withdrawalAmount } // 🔥 EL FIX VITAL
+          pendingBalance: { increment: withdrawalAmount }
         }
       });
 
@@ -182,65 +181,57 @@ exports.getWithdrawalHistory = async (req, res) => {
   }
 };
 
-exports.getWalletDashboard = async (req, res) => {
+// 🔥 LA CONSULTA MAESTRA DEL DASHBOARD (REESCRITA)
+exports.getDashboard = async (req, res) => {
   try {
     const userId = req.user.userId;
-    let wallet = await prisma.wallet.findUnique({ where: { userId } });
-    
-    if (!wallet) {
-      wallet = await prisma.wallet.create({ data: { userId, balance: 0, pendingBalance: 0 } });
-    }
 
-    // 🔥 REPARACIÓN COVRA PAY: Modificamos la búsqueda para que traiga tanto 
-    // lo que recibes (Creador) como las recargas/gastos que haces (Fan).
+    // 1. Buscamos al usuario (para saber si es fan o creador y ver sus créditos)
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    // 2. Buscamos la bóveda real (para ver ganancias de creador)
+    const wallet = await prisma.wallet.findUnique({
+      where: { userId: userId }
+    });
+
+    // 🛡️ FIX 1: Lógica Dinámica de Saldo
+    // Si es Creador ve la plata ganada. Si es Fan, ve sus créditos listos para gastar.
+    const isCreator = user?.role === 'CREATOR' || user?.role === 'ADMIN';
+    const displayBalance = isCreator ? (wallet?.balance || 0) : (user?.walletBalance || 0);
+
+    // 🛡️ FIX 2: Visión Total de Transacciones
+    // Buscamos sin filtro estricto de "status" para evitar que se oculten propinas
     const recentTransactions = await prisma.transaction.findMany({
-      where: { 
+      where: {
         OR: [
-          // Eres el receptor (Alguien te pagó o dio propina)
-          { receiverId: userId, status: 'COMPLETED' },
-          // O eres el emisor y es una recarga de saldo
-          { senderId: userId, type: 'CREDIT_TOPUP', status: 'COMPLETED' },
-          // O eres el emisor y gastaste dinero (opcional, para que el fan vea sus gastos)
-          { senderId: userId, status: 'COMPLETED' }
+          { senderId: userId },   // 👈 Lo que tú GASTAS
+          { receiverId: userId }  // 👈 Lo que tú RECIBES
         ]
       },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-      include: { 
-        sender: { select: { username: true, email: true } },
-        receiver: { select: { username: true } } // 👈 Añadido para saber a quién le pagaste
+      orderBy: { 
+        createdAt: 'desc' 
+      },
+      take: 20,
+      include: {
+        sender: { select: { username: true } },
+        receiver: { select: { username: true } }
       }
     });
 
-    const withdrawalHistory = await prisma.withdrawal.findMany({
-      where: { creatorId: userId },
-      orderBy: { createdAt: 'desc' },
-      take: 10
-    });
-
-    // Solo sumamos lo que el usuario ha RECIBIDO para el total histórico
-    const totalEarnings = await prisma.transaction.aggregate({
-      where: { receiverId: userId, status: 'COMPLETED' },
-      _sum: { netAmount: true }
-    });
-
-    // 🎯 ADAPTADOR PARA EL FRONTEND
-    // Marcamos cada transacción para que el frontend sepa si entró o salió dinero
-    const formattedTransactions = recentTransactions.map(tx => ({
-      ...tx,
-      // Es ingreso si tú eres el receptor, o si es una recarga a tu cuenta
-      isIncome: tx.receiverId === userId || tx.type === 'CREDIT_TOPUP'
-    }));
-
     res.status(200).json({
-      wallet,
-      recentTransactions: formattedTransactions,
-      withdrawalHistory,
-      totalEarnedHistorial: totalEarnings._sum.netAmount || 0
+      wallet: {
+        balance: displayBalance,
+        pendingBalance: wallet?.pendingBalance || 0,
+        cryptoAddress: wallet?.cryptoAddress || null
+      },
+      recentTransactions: recentTransactions
     });
+
   } catch (error) {
-    console.error("Error en getWalletDashboard:", error);
-    res.status(500).json({ error: 'Error interno al cargar los datos financieros.' });
+    console.error("❌ Error en Wallet Bóveda:", error);
+    res.status(500).json({ error: "Error al obtener datos de la billetera." });
   }
 };
 
