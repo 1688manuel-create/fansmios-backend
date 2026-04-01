@@ -575,5 +575,9 @@ model PlatformSettings {
   feeLive            Float    @default(30.0) // 30% para transmisiones en vivo
   feeWithdrawalStd   Float    @default(2.0)  // 2% por retiro normal
   feeWithdrawalExp   Float    @default(5.0)  // 5% por retiro rápido
+  
+  // 🔥 NUEVO: Porcentaje de ganancia para el sistema de Referidos (Ej: 5%)
+  feeReferral        Float    @default(5.0)  
+
   updatedAt          DateTime @updatedAt
 }
