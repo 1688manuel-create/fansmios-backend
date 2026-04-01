@@ -15,7 +15,9 @@ const { AccessToken } = require('livekit-server-sdk');
 const { startSubscriptionCron } = require('./utils/subscriptionCron'); 
 const startBalanceReleaser = require('./cron/balanceReleaser'); 
 const cron = require('node-cron'); 
-const postController = require('./controllers/postController'); 
+const postController = require('./controllers/postController');
+// Importamos las rutas de estadísticas
+const statsRoutes = require('./routes/statsRoutes'); 
 
 // ==========================================
 // 1. INICIALIZACIÓN Y MONITOREO (Sentry)
@@ -117,9 +119,11 @@ app.use('/api/settings', require('./routes/settingsRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/referrals', require('./routes/referralRoutes'));
-app.use('/api/analytics', require('./routes/analyticsRoutes'));
+app.use('/api/stats', require('./routes/statsRoutes'));
 app.use('/api/profile/kyc', require('./routes/kycRoutes'));
 app.use('/api/2fa', require('./routes/auth2faRoutes'));
+// Conectamos la puerta para que el frontend la encuentre
+app.use('/api/stats', statsRoutes);
 
 // 🔥 NUEVO: RUTA PARA EL BOLETO DE LIVEKIT (EXPERIENCIA TIKTOK)
 app.post('/api/livekit/token', async (req, res) => {
