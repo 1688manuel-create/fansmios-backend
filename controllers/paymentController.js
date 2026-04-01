@@ -22,6 +22,7 @@ exports.createPaymentIntent = async (req, res) => {
     let finalAmount = parseFloat(amount);
     let appliedCouponId = null;
 
+    // 🔥 Lógica de Cupones de Descuento
     if (couponCode && creatorId && type !== 'TIP') {
       const coupon = await prisma.coupon.findUnique({ where: { code: couponCode.toUpperCase() } });
       if (coupon && coupon.creatorId === creatorId && coupon.active) {
@@ -37,8 +38,8 @@ exports.createPaymentIntent = async (req, res) => {
 
     if (finalAmount < 0.50) finalAmount = 0.50;
 
-    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL
-    const settings = await prisma.platformSettings.findFirst() || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20 };
+    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL (Agregamos feeReferral)
+    const settings = await prisma.platformSettings.findFirst() || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20, feeReferral: 5 };
     
     let feePercent = 0.20; // Default por seguridad
     if (type === 'LIVE_TICKET' || type === 'PPV_LIVE') {
@@ -48,7 +49,7 @@ exports.createPaymentIntent = async (req, res) => {
     } else if (type === 'TIP') {
       feePercent = settings.feeTips / 100;
     } else if (type === 'CREDIT_TOPUP') {
-      feePercent = 0; // 👈 Las recargas no cobran comisión al fan (o puedes ponerle un fee si gustas)
+      feePercent = 0; 
     } else {
       feePercent = settings.feePPV / 100; 
     }
@@ -125,6 +126,7 @@ exports.createPaymentIntent = async (req, res) => {
           update: { pendingBalance: { increment: netAmount } },
           create: { userId: creatorId, pendingBalance: netAmount }
         });
+
         // 🔴 DESCONTAR EL DINERO DE LA BÓVEDA DEL FAN
         const fanWallet = await db.wallet.findUnique({ where: { userId: fanId } });
         if (!fanWallet || fanWallet.balance < finalAmount) {
@@ -135,6 +137,49 @@ exports.createPaymentIntent = async (req, res) => {
           where: { userId: fanId },
           data: { balance: { decrement: finalAmount } }
         });
+
+        // ==========================================
+        // 🤝 MOTOR DE REFERIDOS (LA MAGIA DE LA FASE 3)
+        // ==========================================
+        const creatorData = await db.user.findUnique({ where: { id: creatorId }, select: { referredById: true, username: true } });
+        
+        if (creatorData && creatorData.referredById) {
+          const referralPercent = (settings.feeReferral || 5) / 100;
+          const referralBonus = finalAmount * referralPercent;
+
+          // 1. Le depositamos la comisión al Padrino directamente a su saldo disponible
+          await db.wallet.upsert({
+            where: { userId: creatorData.referredById },
+            update: { balance: { increment: referralBonus } },
+            create: { userId: creatorData.referredById, balance: referralBonus }
+          });
+
+          // 2. Creamos el recibo vital para que el Panel de Referidos lo sume
+          await db.transaction.create({
+            data: { 
+              senderId: creatorId, // El creador que generó la venta
+              receiverId: creatorData.referredById, // El padrino que cobra la comisión
+              type: 'PROMOTION', 
+              status: 'COMPLETED', 
+              amount: referralBonus, 
+              platformFee: 0, 
+              netAmount: referralBonus, 
+              attachedMessage: `Comisión por referido de @${creatorData.username}`, // 👈 ESTO ES CLAVE
+              payramReceiptId: `REF-${crypto.randomBytes(6).toString('hex').toUpperCase()}`
+            }
+          });
+
+          // 3. Notificamos al Padrino
+          await db.notification.create({
+            data: {
+              userId: creatorData.referredById,
+              type: 'MONEY',
+              content: `¡Dinero pasivo! 💸 Ganaste $${referralBonus.toFixed(2)} por una venta de tu referido @${creatorData.username}.`,
+              link: '/dashboard/referrals'
+            }
+          });
+        }
+        // ==========================================
 
         let notificationMessage = '';
         let notificationType = 'MONEY';
@@ -179,6 +224,11 @@ exports.createPaymentIntent = async (req, res) => {
         } else if (type === 'TIP') {
           notificationMessage = `@${fan.username} te ha enviado una propina de $${finalAmount}! 💸 "${description || '¡Gracias!'}"`;
           notificationType = 'TIP';
+          
+        // 🦅 EL PARCHE ANTI-FUGAS (Para evitar notificaciones vacías)
+        } else {
+          notificationMessage = `@${fan.username} realizó un pago de $${finalAmount}. 💰`;
+          notificationType = 'MONEY';
         }
 
         // Notificar al Creador
@@ -195,7 +245,7 @@ exports.createPaymentIntent = async (req, res) => {
       }
     });
 
-    // 🚀 RESPUESTA AL FRONTEND: Le enviamos un checkoutUrl simulado para que recargue la página si es un TopUp.
+    // 🚀 RESPUESTA AL FRONTEND
     res.status(200).json({ 
       success: true, 
       message: 'Procesado por Covra Pay', 
