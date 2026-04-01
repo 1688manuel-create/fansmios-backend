@@ -26,7 +26,7 @@ exports.approveWithdrawal = async (req, res) => {
   try {
     const withdrawalId = req.params.withdrawalId || req.body.withdrawalId || req.body.id;
     const txHash = req.body.txHash || 'PAGO_MANUAL_ADMIN'; 
-    const adminNotes = req.body.adminNotes || req.body.reason || 'Pago verificado y enviado vía PayRam (Manual).';
+    const adminNotes = req.body.adminNotes || req.body.reason || 'Pago verificado y enviado vía Covra Pay (Manual).';
 
     if (!withdrawalId) return res.status(400).json({ error: 'ID de retiro no proporcionado.' });
 

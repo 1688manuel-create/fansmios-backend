@@ -8,4 +8,7 @@ const { verifyToken } = require('../middlewares/authMiddleware');
 router.get('/my-link', verifyToken, referralController.getMyReferralInfo);
 router.get('/my-network', verifyToken, referralController.getMyNetwork);
 
+// 🔥 NUEVA RUTA: Estadísticas del Panel Neomórfico
+router.get('/stats', verifyToken, referralController.getReferralStats);
+
 module.exports = router;

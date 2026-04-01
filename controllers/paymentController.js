@@ -198,13 +198,13 @@ exports.createPaymentIntent = async (req, res) => {
     // 🚀 RESPUESTA AL FRONTEND: Le enviamos un checkoutUrl simulado para que recargue la página si es un TopUp.
     res.status(200).json({ 
       success: true, 
-      message: 'Procesado por PayRam', 
+      message: 'Procesado por Covra Pay', 
       receipt: payramReceiptId,
       checkoutUrl: type === 'CREDIT_TOPUP' ? '/dashboard' : undefined 
     });
 
   } catch (error) {
-    console.error("Error PayRam:", error);
+    console.error("Error Covra Pay:", error);
     res.status(500).json({ error: error.message || 'Error en el motor de pagos interno.' });
   }
 };

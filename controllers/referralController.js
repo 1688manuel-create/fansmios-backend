@@ -59,3 +59,56 @@ exports.getMyNetwork = async (req, res) => {
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
+
+// ==========================================
+// 3. 🔥 NUEVO: ESTADÍSTICAS PARA EL PANEL NEOMÓRFICO
+// ==========================================
+exports.getReferralStats = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // 1. Buscamos a todos los "hijos" (usuarios invitados)
+    const invitedUsers = await prisma.user.findMany({
+      where: { referredById: userId },
+      select: { 
+        id: true, 
+        username: true, 
+        createdAt: true, 
+        status: true 
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    // 2. Buscamos el dinero ganado por comisiones
+    const referralEarnings = await prisma.transaction.findMany({
+      where: { 
+        receiverId: userId,
+        attachedMessage: { contains: "Comisión por referido" }
+      }
+    });
+
+    const totalEarned = referralEarnings.reduce((acc, tx) => acc + (parseFloat(tx.amount || tx.netAmount || 0)), 0);
+
+    // 3. Traemos la comisión configurada en la base de datos (Ej: 5%)
+    const settings = await prisma.platformSettings.findFirst();
+    const commissionRate = settings?.feeReferral || 5;
+
+    // 4. Formateamos los datos exactamente como los pide el Frontend
+    const recentReferrals = invitedUsers.map(u => ({
+      username: u.username || 'Usuario',
+      date: u.createdAt.toISOString().split('T'),
+      status: u.status === 'ACTIVE' ? 'Activo' : 'Inactivo'
+    }));
+
+    res.status(200).json({
+      totalReferred: invitedUsers.length,
+      totalEarned: totalEarned,
+      commissionRate: `${commissionRate}%`,
+      recentReferrals: recentReferrals
+    });
+
+  } catch (error) {
+    console.error('Error en getReferralStats:', error);
+    res.status(500).json({ error: 'Error cargando las estadísticas de referidos.' });
+  }
+};
