@@ -58,8 +58,8 @@ exports.getCreatorStats = async (req, res) => {
     // ==========================================
     const uniqueActiveSubscribers = await prisma.subscription.findMany({
       where: { creatorId: userId, status: 'ACTIVE' },
-      distinct: ['userId'], 
-      select: { userId: true } 
+      distinct: ['fanId'], // 👈 AQUÍ ESTÁ LA MAGIA: Usamos fanId
+      select: { fanId: true } // 👈 Y AQUÍ TAMBIÉN
     });
     const activeSubscribers = uniqueActiveSubscribers.length;
 
