@@ -289,6 +289,11 @@ exports.addComment = async (req, res) => {
       data: { content, postId: id, userId, parentId: parentId || null }
     });
 
+    let notifiedUserId = null;
+
+    // ==========================================
+    // 📡 RADAR 1: NOTIFICAR AL DUEÑO DEL COMENTARIO PADRE (Nietos/Bisnietos)
+    // ==========================================
     if (parentId) {
       const parentComment = await prisma.comment.findUnique({ where: { id: parentId } });
       if (parentComment && parentComment.userId !== userId) {
@@ -300,22 +305,29 @@ exports.addComment = async (req, res) => {
             link: `/feed#post-${post.id}-comment-${comment.id}` 
           }
         });
+        notifiedUserId = parentComment.userId; // Registramos a quién le acabamos de avisar
       }
-    } else {
-      if (post.userId !== userId) {
-        await prisma.notification.create({
-          data: {
-            userId: post.userId,
-            type: 'COMMENT',
-            content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
-            link: `/feed#post-${post.id}-comment-${comment.id}` 
-          }
-        });
-      }
+    } 
+
+    // ==========================================
+    // 📡 RADAR 2: NOTIFICAR AL CREADOR DE LA PUBLICACIÓN
+    // ==========================================
+    // Avisamos al dueño de la publicación siempre y cuando no sea él mismo el que comenta, 
+    // y tampoco le hayamos avisado ya en el Radar 1.
+    if (post.userId !== userId && post.userId !== notifiedUserId) {
+      await prisma.notification.create({
+        data: {
+          userId: post.userId,
+          type: 'COMMENT',
+          content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
+          link: `/feed#post-${post.id}-comment-${comment.id}` 
+        }
+      });
     }
 
     res.status(201).json(comment);
   } catch (error) { 
+    console.error("Error al agregar comentario:", error);
     res.status(500).json({ error: 'Error al comentar.' }); 
   }
 };
