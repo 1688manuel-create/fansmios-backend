@@ -139,45 +139,62 @@ exports.createPaymentIntent = async (req, res) => {
         });
 
         // ==========================================
-        // 🤝 MOTOR DE REFERIDOS (LA MAGIA DE LA FASE 3)
+        // 🤝 MOTOR DE REFERIDOS (SOLO SUSCRIPCIONES - CANDADO 5 MESES)
         // ==========================================
-        const creatorData = await db.user.findUnique({ where: { id: creatorId }, select: { referredById: true, username: true } });
-        
-        if (creatorData && creatorData.referredById) {
-          const referralPercent = (settings.feeReferral || 5) / 100;
-          const referralBonus = finalAmount * referralPercent;
-
-          // 1. Le depositamos la comisión al Padrino directamente a su saldo disponible
-          await db.wallet.upsert({
-            where: { userId: creatorData.referredById },
-            update: { balance: { increment: referralBonus } },
-            create: { userId: creatorData.referredById, balance: referralBonus }
+        // 🔥 Solo se activa si la venta es una SUSCRIPCIÓN
+        if (type === 'SUBSCRIPTION') {
+          const creatorData = await db.user.findUnique({ 
+            where: { id: creatorId }, 
+            select: { referredById: true, username: true, createdAt: true } 
           });
+          
+          if (creatorData && creatorData.referredById) {
+            
+            // ⏳ REGLA DE ORO: Calcular si han pasado menos de 5 meses
+            const expirationDate = new Date(creatorData.createdAt);
+            expirationDate.setMonth(expirationDate.getMonth() + 5);
+            const now = new Date();
 
-          // 2. Creamos el recibo vital para que el Panel de Referidos lo sume
-          await db.transaction.create({
-            data: { 
-              senderId: creatorId, // El creador que generó la venta
-              receiverId: creatorData.referredById, // El padrino que cobra la comisión
-              type: 'PROMOTION', 
-              status: 'COMPLETED', 
-              amount: referralBonus, 
-              platformFee: 0, 
-              netAmount: referralBonus, 
-              attachedMessage: `Comisión por referido de @${creatorData.username}`, // 👈 ESTO ES CLAVE
-              payramReceiptId: `REF-${crypto.randomBytes(6).toString('hex').toUpperCase()}`
+            if (now <= expirationDate) {
+              const referralPercent = (settings.feeReferral || 5) / 100;
+              const referralBonus = finalAmount * referralPercent;
+
+              // Le depositamos la comisión al Padrino
+              await db.wallet.upsert({
+                where: { userId: creatorData.referredById },
+                update: { balance: { increment: referralBonus } },
+                create: { userId: creatorData.referredById, balance: referralBonus }
+              });
+
+              // Creamos el recibo vital
+              await db.transaction.create({
+                data: { 
+                  senderId: creatorId, 
+                  receiverId: creatorData.referredById, 
+                  type: 'PROMOTION', 
+                  status: 'COMPLETED', 
+                  amount: referralBonus, 
+                  platformFee: 0, 
+                  netAmount: referralBonus, 
+                  attachedMessage: `Comisión por referido de @${creatorData.username}`, 
+                  payramReceiptId: `REF-${crypto.randomBytes(6).toString('hex').toUpperCase()}`
+                }
+              });
+
+              // Notificamos al Padrino
+              await db.notification.create({
+                data: {
+                  userId: creatorData.referredById,
+                  type: 'MONEY',
+                  content: `¡Dinero pasivo! 💸 Ganaste $${referralBonus.toFixed(2)} por una suscripción de tu referido @${creatorData.username}.`,
+                  link: '/dashboard/referrals'
+                }
+              });
+            } else {
+              // 🛑 EL TIEMPO EXPIRÓ
+              console.log(`⏱️ Referido expirado: @${creatorData.username} superó los 5 meses. No hay comisión para el padrino.`);
             }
-          });
-
-          // 3. Notificamos al Padrino
-          await db.notification.create({
-            data: {
-              userId: creatorData.referredById,
-              type: 'MONEY',
-              content: `¡Dinero pasivo! 💸 Ganaste $${referralBonus.toFixed(2)} por una venta de tu referido @${creatorData.username}.`,
-              link: '/dashboard/referrals'
-            }
-          });
+          }
         }
         // ==========================================
 
