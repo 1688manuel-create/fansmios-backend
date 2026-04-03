@@ -169,14 +169,12 @@ exports.getPublicProfile = async (req, res) => {
     if (user.creatorProfile && user.creatorProfile.blockedCountries) {
       // FIX de seguridad: Evitar error si hay proxy múltiple
       const rawIps = req.headers['x-forwarded-for'] || '';
-      const clientIp = rawIps ? rawIps.split(',')[0].trim() : req.socket.remoteAddress;
+      const clientIp = rawIps ? rawIps.split(',').trim() : req.socket.remoteAddress;
       
       // Consultamos el país de esa IP
       const geo = geoip.lookup(clientIp);
       const visitorCountry = geo ? geo.country : null; 
       
-      console.log(`📡 Visitante intentando entrar a @${username} | IP: ${clientIp} | País: ${visitorCountry || 'Local/Desconocido'}`);
-
       // Si detectamos de qué país viene, comparamos con la lista negra
       if (visitorCountry) {
         const blockedList = user.creatorProfile.blockedCountries
@@ -184,7 +182,6 @@ exports.getPublicProfile = async (req, res) => {
           .map(country => country.trim().toUpperCase());
 
         if (blockedList.includes(visitorCountry)) {
-          console.log(`🛑 Acceso bloqueado. El usuario bloqueó: ${visitorCountry}`);
           return res.status(403).json({ 
             error: '🚫 Este perfil no está disponible en tu región.' 
           });
@@ -193,7 +190,31 @@ exports.getPublicProfile = async (req, res) => {
     }
     // 🌍 FIN DEL ESCUDO
 
-    res.status(200).json({ profile: user });
+    // 🔥 NUEVA LÓGICA: ¿El visitante actual sigue a este creador?
+    let isFollowing = false;
+    
+    // Como usamos optionalAuth en la ruta, req.user existe SI el visitante está logueado
+    if (req.user) {
+      const followRecord = await prisma.follow.findUnique({
+        where: {
+          followerId_followingId: {
+            followerId: req.user.userId, // ID del visitante (Fan)
+            followingId: user.id         // ID del creador ("titi")
+          }
+        }
+      });
+      
+      if (followRecord) {
+        isFollowing = true;
+      }
+    }
+
+    // 🔥 Agregamos isFollowing a la respuesta para que el frontend lo sepa
+    res.status(200).json({ 
+      profile: user,
+      isFollowing: isFollowing 
+    });
+    
   } catch (error) {
     console.error('Error al obtener perfil público:', error);
     res.status(500).json({ error: 'Error interno del servidor.' });
