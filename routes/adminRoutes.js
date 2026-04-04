@@ -6,6 +6,7 @@ const adminPayoutController = require('../controllers/adminPayoutController'); /
 const adminKycController = require('../controllers/adminKycController'); // 🔥 NUEVO CEREBRO LEGAL
 const adminAnalyticsController = require('../controllers/adminAnalyticsController');
 const settingsController = require('../controllers/settingsController'); // 🔥 CEREBRO DE COMISIONES
+const adminSettingsController = require('../controllers/adminSettingsController');
 
 // 🛡️ Importamos a los guardias de seguridad (Solo el CEO pasa)
 const { verifyToken, isAdmin } = require('../middlewares/authMiddleware');
@@ -39,6 +40,10 @@ router.put('/reports/resolve', verifyToken, isAdmin, adminController.resolveRepo
 // 👑 RUTAS DEL MODO DIOS (Protegidas por los guardias del CEO)
 router.get('/platform-settings', verifyToken, isAdmin, settingsController.getPlatformSettings);
 router.put('/platform-settings', verifyToken, isAdmin, settingsController.updatePlatformSettings);
+
+// Rutas de configuración
+router.get('/settings/welcome', adminSettingsController.getWelcomeMessages);
+router.post('/settings/welcome', adminSettingsController.updateWelcomeMessages);
 
 // Obtención de datos y Listas
 router.get('/reports', verifyToken, isAdmin, adminController.getReports);
