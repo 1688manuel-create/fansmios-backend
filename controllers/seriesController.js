@@ -181,16 +181,18 @@ exports.buySeries = async (req, res) => {
         data: { seriesId, fanId, pricePaid: price }
       });
 
-      // D) GENERAR RECIBOS (¡CORREGIDO PARA PRISMA! 🚨)
+      // D) GENERAR RECIBOS (¡BLINDADO PARA PRISMA! 🚨)
+      
       // Recibo para el Fan (Gasto)
       await tx.transaction.create({
         data: {
           userId: fanId,
-          amount: -price,
+          amount: -price,          // Bruto que sale
           type: 'PURCHASE',
           status: 'COMPLETED',
           description: `Compra de curso: ${series.title}`,
-          platformFee: 0 // 👈 Prisma exige este campo
+          platformFee: 0,          // El fan no paga comisión extra
+          netAmount: -price        // Neto que se descuenta
         }
       });
 
@@ -198,11 +200,12 @@ exports.buySeries = async (req, res) => {
       await tx.transaction.create({
         data: {
           userId: series.creatorId,
-          amount: creatorEarnings,
+          amount: price,           // Bruto que entra
           type: 'SALE',
           status: 'PENDING',
           description: `Venta de curso: ${series.title}`,
-          platformFee: platformFee // 👈 Prisma exige este campo
+          platformFee: platformFee,// Lo que se queda FansMio
+          netAmount: creatorEarnings // Lo que realmente recibe el creador
         }
       });
 
