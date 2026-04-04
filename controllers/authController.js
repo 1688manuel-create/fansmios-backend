@@ -15,26 +15,33 @@ exports.register = async (req, res) => {
 
     // 1. Validar que no falten datos
     if (!username || !email || !password) {
-      return res.status(400).json({ error: 'El usuario, email y contraseña son obligatorios.' });
+      return res.status(400).json({ error: 'Faltan datos obligatorios.' });
     }
 
     // ==========================================
-    // 🛡️ ESCUDO ANTI-CORREOS (BLINDADO)
+    // 🛡️ ESCUDO ANTI-CORREOS (FUERZA BRUTA)
     // ==========================================
-    const emailString = String(email).trim().toLowerCase();
-    const emailParts = emailString.split('@');
-    const emailDomain = emailParts.length > 1 ? emailParts : '';
+    // 1. Limpiamos cualquier basura oculta, espacios invisibles o comillas que mande el frontend
+    const cleanEmail = String(email).toLowerCase().replace(/[\s'"]/g, ''); 
     
-    const allowedDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'live.com', 'msn.com'];
+    const allowedDomains = [
+      '@gmail.com', '@yahoo.com', '@outlook.com', 
+      '@hotmail.com', '@icloud.com', '@live.com', '@msn.com'
+    ];
 
-    if (!emailDomain || !allowedDomains.includes(emailDomain)) {
+    // 2. Verificamos si el correo TERMINA con alguno de esos dominios permitidos
+    const isValidDomain = allowedDomains.some(domain => cleanEmail.endsWith(domain));
+
+    if (!isValidDomain) {
+      console.log("🚨 ALERTA DE SISTEMA: Correo bloqueado ->", cleanEmail);
       return res.status(403).json({ 
         error: 'Por seguridad, solo aceptamos correos de Gmail, Outlook, Yahoo o iCloud. No se permiten correos temporales. 🛑' 
       });
     }
+    // ==========================================
 
-    // 2. Verificar duplicados
-    const existingUser = await prisma.user.findUnique({ where: { email: emailString } });
+    // 2. Verificar duplicados (usando el correo limpio)
+    const existingUser = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (existingUser) return res.status(400).json({ error: 'Este correo ya está registrado.' });
 
     const safeUsername = String(username).toLowerCase().replace(/\s+/g, '');
@@ -59,7 +66,7 @@ exports.register = async (req, res) => {
     const newUser = await prisma.user.create({
       data: {
         username: safeUsername,
-        email: emailString,
+        email: cleanEmail, // Guardamos el correo súper limpio
         passwordHash: hashedPassword,
         role: role === 'CREATOR' ? 'CREATOR' : 'FAN',
         referredById: referrerId,
