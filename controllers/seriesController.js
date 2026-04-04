@@ -151,17 +151,16 @@ exports.buySeries = async (req, res) => {
       });
       if (existingPurchase) throw new Error('Ya tienes acceso a este curso.');
 
-      // 3. Cargar Billeteras
+      // 3. Cargar Billetera
       const fanWallet = await tx.wallet.findUnique({ where: { userId: fanId } });
-      const creatorWallet = await tx.wallet.findUnique({ where: { userId: series.creatorId } });
 
       if (!fanWallet || fanWallet.balance < series.price) {
         throw new Error('Saldo insuficiente en Covra Pay.');
       }
 
-      // 4. CÁLCULOS FINANCIEROS (Limpios con 2 decimales)
+      // 4. CÁLCULOS FINANCIEROS
       const price = parseFloat(series.price);
-      const platformFee = parseFloat((price * 0.10).toFixed(2));
+      const platformFee = parseFloat((price * 0.10).toFixed(2)); // 10% comisión
       const creatorEarnings = parseFloat((price - platformFee).toFixed(2));
 
       // A) DESCUENTO AL FAN
@@ -176,45 +175,47 @@ exports.buySeries = async (req, res) => {
         data: { pendingBalance: { increment: creatorEarnings } }
       });
 
-      // C) REGISTRO DE ACCESO (Para que el fan pueda ver los videos)
+      // C) REGISTRO DE ACCESO
       const purchase = await tx.seriesPurchase.create({
         data: { seriesId, fanId, pricePaid: price }
       });
 
-      // D) GENERAR RECIBOS (¡BLINDADO PARA PRISMA! 🚨)
+      // D) GENERAR RECIBOS (¡100% ALINEADOS A TU SCHEMA! 🚨)
       
       // Recibo para el Fan (Gasto)
       await tx.transaction.create({
         data: {
-          userId: fanId,
-          amount: -price,          // Bruto que sale
-          type: 'PURCHASE',
+          senderId: fanId,
+          receiverId: series.creatorId,
+          amount: -price,
+          type: 'BUNDLE', // Usamos BUNDLE porque está en tu enum
           status: 'COMPLETED',
-          description: `Compra de curso: ${series.title}`,
-          platformFee: 0,          // El fan no paga comisión extra
-          netAmount: -price        // Neto que se descuenta
+          attachedMessage: `Compra de academia VIP: ${series.title}`,
+          platformFee: 0,
+          netAmount: -price
         }
       });
 
       // Recibo para el Creador (Ingreso)
       await tx.transaction.create({
         data: {
-          userId: series.creatorId,
-          amount: price,           // Bruto que entra
-          type: 'SALE',
+          senderId: fanId,
+          receiverId: series.creatorId,
+          amount: price,
+          type: 'BUNDLE', // Usamos BUNDLE porque está en tu enum
           status: 'PENDING',
-          description: `Venta de curso: ${series.title}`,
-          platformFee: platformFee,// Lo que se queda FansMio
-          netAmount: creatorEarnings // Lo que realmente recibe el creador
+          attachedMessage: `Venta de academia VIP: ${series.title}`,
+          platformFee: platformFee,
+          netAmount: creatorEarnings
         }
       });
 
-      // E) NOTIFICACIÓN
+      // E) NOTIFICACIÓN AL CREADOR
       await tx.notification.create({
         data: {
           userId: series.creatorId,
           type: 'SALE',
-          content: `¡Venta de curso! Has ganado $${creatorEarnings} por "${series.title}"`
+          content: `¡Felicidades! Alguien compró tu curso "${series.title}". Ganaste $${creatorEarnings} USD.`
         }
       });
 
