@@ -2,7 +2,9 @@
 const express = require('express');
 const router = express.Router();
 const seriesController = require('../controllers/seriesController');
-const { verifyToken } = require('../middleware/authMiddleware');
+
+// 🔥 AQUÍ ESTABA EL ERROR: Agregamos la "s" a middlewares
+const { verifyToken } = require('../middlewares/authMiddleware'); 
 const upload = require('../utils/multerConfig');
 
 // Rutas Públicas (Cualquiera puede ver la vitrina)
