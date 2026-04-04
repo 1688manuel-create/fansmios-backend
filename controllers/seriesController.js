@@ -132,6 +132,9 @@ exports.getCreatorSeries = async (req, res) => {
   }
 };
 
+// ==========================================
+// 4. COMPRAR SERIE (INTEGRACIÓN CON COVRA PAY)
+// ==========================================
 exports.buySeries = async (req, res) => {
   const fanId = req.user.userId;
   const { seriesId } = req.params;
@@ -178,7 +181,7 @@ exports.buySeries = async (req, res) => {
         data: { seriesId, fanId, pricePaid: price }
       });
 
-      // D) GENERAR RECIBOS (Para que aparezcan en el historial de la billetera)
+      // D) GENERAR RECIBOS (¡CORREGIDO PARA PRISMA! 🚨)
       // Recibo para el Fan (Gasto)
       await tx.transaction.create({
         data: {
@@ -186,7 +189,8 @@ exports.buySeries = async (req, res) => {
           amount: -price,
           type: 'PURCHASE',
           status: 'COMPLETED',
-          description: `Compra de curso: ${series.title}`
+          description: `Compra de curso: ${series.title}`,
+          platformFee: 0 // 👈 Prisma exige este campo
         }
       });
 
@@ -197,7 +201,8 @@ exports.buySeries = async (req, res) => {
           amount: creatorEarnings,
           type: 'SALE',
           status: 'PENDING',
-          description: `Venta de curso: ${series.title}`
+          description: `Venta de curso: ${series.title}`,
+          platformFee: platformFee // 👈 Prisma exige este campo
         }
       });
 
