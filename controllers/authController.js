@@ -97,58 +97,52 @@ exports.register = async (req, res) => {
     }
 
     // ==========================================
-    // 🔥 10. MOTOR DE BIENVENIDA AUTOMÁTICA (CONECTADO A BD)
+    // 🔥 10. MOTOR DE BIENVENIDA AUTOMÁTICA
     // ==========================================
     try {
-      // Buscamos a la cuenta Administradora Principal (Tú)
+      console.log("🚀 [MOTOR BIENVENIDA] Iniciando protocolo para:", newUser.email);
+      
       const adminUser = await prisma.user.findFirst({
         where: { role: 'ADMIN' },
-        orderBy: { createdAt: 'asc' } // Toma al primer admin creado
+        orderBy: { createdAt: 'asc' }
       });
 
+      console.log("👑 [MOTOR BIENVENIDA] Admin encontrado:", adminUser ? adminUser.email : "⚠️ NINGUNO (Abortando)");
+
       if (adminUser) {
-        // 🔥 LEEMOS LA BASE DE DATOS EN TIEMPO REAL
+        console.log("📖 [MOTOR BIENVENIDA] Buscando textos en la BD...");
         const creatorSetting = await prisma.systemSetting.findUnique({ where: { key: 'WELCOME_CREATOR' } });
         const fanSetting = await prisma.systemSetting.findUnique({ where: { key: 'WELCOME_FAN' } });
+        
+        console.log("✅ [MOTOR BIENVENIDA] Textos encontrados, enviando mensaje...");
 
-        // Asignamos el texto real o un fallback si por alguna razón la tabla está vacía
+        // Asignamos el texto real o un fallback...
         const welcomeText = newUser.role === 'CREATOR' 
-          ? (creatorSetting?.value || "¡Bienvenido a FansMio, Comandante! ⚡\n\nEstamos felices de tenerte aquí. Para empezar a facturar, te recomendamos:\n1. Completa tu perfil público.\n2. Sube tu primera foto/video.\n3. Configura tu Billetera Covra Pay.\n\nSi tienes dudas, respóndeme por aquí.")
-          : (fanSetting?.value || "¡Bienvenido a FansMio! ⚡\n\nPrepárate para disfrutar del mejor contenido exclusivo. Explora, interactúa y apoya a tus creadores favoritos.\n\nSi necesitas ayuda, estamos aquí para ti.");
+          ? (creatorSetting?.value || "¡Bienvenido a FansMio, Creador! ⚡")
+          : (fanSetting?.value || "¡Bienvenido a FansMio! ⚡");
 
-        // Creamos el buzón de chat entre el Admin y el Nuevo Usuario
+        // Creamos el buzón...
         const newConv = await prisma.conversation.create({
-          data: {
-            creatorId: adminUser.id,
-            fanId: newUser.id, 
-          }
+          data: { creatorId: adminUser.id, fanId: newUser.id }
         });
 
-        // Inyectamos el mensaje en la base de datos
+        // Inyectamos el mensaje...
         await prisma.message.create({
           data: {
-            conversationId: newConv.id,
-            senderId: adminUser.id,
-            receiverId: newUser.id,
-            content: welcomeText,
-            isPPV: false,
-            price: 0
+            conversationId: newConv.id, senderId: adminUser.id, receiverId: newUser.id,
+            content: welcomeText, isPPV: false, price: 0
           }
         });
 
-        // Le enviamos una notificación de que le hablaste
+        // Notificación...
         await prisma.notification.create({
-          data: {
-            userId: newUser.id,
-            type: 'MESSAGE',
-            content: `¡Bienvenido! Tienes un mensaje del Equipo FansMio ⚡`,
-            link: '/dashboard/messages'
-          }
+          data: { userId: newUser.id, type: 'MESSAGE', content: `¡Bienvenido! Tienes un mensaje del Equipo FansMio ⚡`, link: '/dashboard/messages' }
         });
+        
+        console.log("🎯 [MOTOR BIENVENIDA] ¡Misión Cumplida!");
       }
     } catch (welcomeError) {
-      console.error("🚨 Error silencioso en el mensaje de bienvenida:", welcomeError);
-      // No bloqueamos el registro si esto falla, por eso está en un try/catch aislado
+      console.error("🚨 [MOTOR BIENVENIDA] ERROR CRÍTICO:", welcomeError);
     }
     // ==========================================
 
