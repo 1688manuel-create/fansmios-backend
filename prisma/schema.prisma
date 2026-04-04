@@ -581,3 +581,9 @@ model PlatformSettings {
 
   updatedAt          DateTime @updatedAt
 }
+
+model SystemSetting {
+  key   String @id
+  value String @db.Text
+  updatedAt DateTime @updatedAt
+}
