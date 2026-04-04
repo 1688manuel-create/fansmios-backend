@@ -11,7 +11,6 @@ const prisma = new PrismaClient();
 
 exports.register = async (req, res) => {
   try {
-    // Agregamos username para recibirlo desde el frontend
     const { username, email, password, role, referralCode } = req.body;
 
     // 1. Validar que no falten datos
@@ -20,56 +19,47 @@ exports.register = async (req, res) => {
     }
 
     // ==========================================
-    // 🛡️ ESCUDO ANTI-CORREOS TEMPORALES (LISTA BLANCA)
+    // 🛡️ ESCUDO ANTI-CORREOS (BLINDADO)
     // ==========================================
-    const emailDomain = email.split('@')?.toLowerCase();
+    const emailString = String(email).trim().toLowerCase();
+    const emailParts = emailString.split('@');
+    const emailDomain = emailParts.length > 1 ? emailParts : '';
     
-    // Aquí pones los únicos proveedores que confías
-    const allowedDomains = [
-      'gmail.com', 
-      'yahoo.com', 
-      'outlook.com', 
-      'hotmail.com', 
-      'icloud.com',   // Usuarios de Apple
-      'live.com', 
-      'msn.com'
-    ];
+    const allowedDomains = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'live.com', 'msn.com'];
 
     if (!emailDomain || !allowedDomains.includes(emailDomain)) {
       return res.status(403).json({ 
-        error: 'Por seguridad, solo aceptamos correos de Gmail, Outlook, Yahoo o iCloud. No se permiten correos temporales ni empresariales genéricos. 🛑' 
+        error: 'Por seguridad, solo aceptamos correos de Gmail, Outlook, Yahoo o iCloud. No se permiten correos temporales. 🛑' 
       });
     }
-    // ==========================================
 
-    // 2. Verificar si el correo ya existe
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    // 2. Verificar duplicados
+    const existingUser = await prisma.user.findUnique({ where: { email: emailString } });
     if (existingUser) return res.status(400).json({ error: 'Este correo ya está registrado.' });
 
-    // 3. Verificar si el nombre de usuario ya está ocupado
-    const existingUsername = await prisma.user.findUnique({ where: { username } });
+    const safeUsername = String(username).toLowerCase().replace(/\s+/g, '');
+    const existingUsername = await prisma.user.findUnique({ where: { username: safeUsername } });
     if (existingUsername) return res.status(400).json({ error: 'Este nombre de usuario ya está en uso. Elige otro.' });
 
-    // 4. Encriptar contraseña
+    // 3. Encriptación y Referidos
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(String(password), salt);
 
-    // 5. Sistema de referidos (Si aplica)
     let referrerId = null;
     if (referralCode) {
-      const referrer = await prisma.user.findUnique({ where: { referralCode: referralCode } });
+      const referrer = await prisma.user.findUnique({ where: { referralCode: String(referralCode) } });
       if (referrer) referrerId = referrer.id;
     }
 
-    // 6. Generar el Token Mágico de Verificación
+    // 4. Token Mágico
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
 
-    // 7. Crear el usuario en la Base de Datos
+    // 5. Crear Usuario
     const newUser = await prisma.user.create({
       data: {
-        username: username.toLowerCase().replace(/\s+/g, ''), // Guardamos el username sin espacios
-        email,
+        username: safeUsername,
+        email: emailString,
         passwordHash: hashedPassword,
         role: role === 'CREATOR' ? 'CREATOR' : 'FAN',
         referredById: referrerId,
@@ -78,55 +68,47 @@ exports.register = async (req, res) => {
       }
     });
 
-    // 💌 8. ENVIAR CORREO CON EL BOTÓN DE VERIFICACIÓN
+    // 💌 6. ENVÍO DE CORREO CON RED DE SEGURIDAD (ANTI-FANTASMAS)
     const verifyLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
-    await sendEmail(
-      newUser.email, 
-      'Verifica tu correo en FansMio 🔐', 
-      `¡Hola @${newUser.username}!\n\nEstás a un paso de entrar al imperio. Por favor, verifica tu correo haciendo clic en el siguiente enlace (es válido por 24 horas):\n\n${verifyLink}\n\nSi tú no creaste esta cuenta, ignora este mensaje.`
-    );
+    try {
+      await sendEmail(
+        newUser.email, 
+        'Verifica tu correo en FansMio 🔐', 
+        `¡Hola @${newUser.username}!\n\nEstás a un paso de entrar al imperio. Haz clic aquí (válido por 24h):\n\n${verifyLink}`
+      );
+    } catch (emailError) {
+      // Si el correo falla, borramos al usuario para que no quede atorado
+      await prisma.user.delete({ where: { id: newUser.id } });
+      console.error('🚨 Fallo SMTP, usuario eliminado para reintento:', emailError);
+      return res.status(500).json({ error: 'Fallo al enviar el correo de verificación. Inténtalo de nuevo.' });
+    }
 
-    // 9. Crear perfil vacío si eligió ser creador (KYC pendiente)
+    // 7. Crear perfil de creador si aplica
     if (newUser.role === 'CREATOR') {
-      await prisma.creatorProfile.create({ 
-        data: { 
-          userId: newUser.id,
-          kycStatus: 'PENDING' // Lo mandamos directo a revisión por seguridad
-        } 
-      });
+      await prisma.creatorProfile.create({ data: { userId: newUser.id, kycStatus: 'PENDING' } });
     }
 
     // ==========================================
-    // 🔥 10. MOTOR DE BIENVENIDA AUTOMÁTICA
+    // 🔥 8. MOTOR DE BIENVENIDA AUTOMÁTICA
     // ==========================================
     try {
-      console.log("🚀 [MOTOR BIENVENIDA] Iniciando protocolo para:", newUser.email);
-      
       const adminUser = await prisma.user.findFirst({
         where: { role: 'ADMIN' },
         orderBy: { createdAt: 'asc' }
       });
 
-      console.log("👑 [MOTOR BIENVENIDA] Admin encontrado:", adminUser ? adminUser.email : "⚠️ NINGUNO (Abortando)");
-
       if (adminUser) {
-        console.log("📖 [MOTOR BIENVENIDA] Buscando textos en la BD...");
         const creatorSetting = await prisma.systemSetting.findUnique({ where: { key: 'WELCOME_CREATOR' } });
         const fanSetting = await prisma.systemSetting.findUnique({ where: { key: 'WELCOME_FAN' } });
-        
-        console.log("✅ [MOTOR BIENVENIDA] Textos encontrados, enviando mensaje...");
 
-        // Asignamos el texto real o un fallback...
         const welcomeText = newUser.role === 'CREATOR' 
           ? (creatorSetting?.value || "¡Bienvenido a FansMio, Creador! ⚡")
           : (fanSetting?.value || "¡Bienvenido a FansMio! ⚡");
 
-        // Creamos el buzón...
         const newConv = await prisma.conversation.create({
           data: { creatorId: adminUser.id, fanId: newUser.id }
         });
 
-        // Inyectamos el mensaje...
         await prisma.message.create({
           data: {
             conversationId: newConv.id, senderId: adminUser.id, receiverId: newUser.id,
@@ -134,15 +116,12 @@ exports.register = async (req, res) => {
           }
         });
 
-        // Notificación...
         await prisma.notification.create({
           data: { userId: newUser.id, type: 'MESSAGE', content: `¡Bienvenido! Tienes un mensaje del Equipo FansMio ⚡`, link: '/dashboard/messages' }
         });
-        
-        console.log("🎯 [MOTOR BIENVENIDA] ¡Misión Cumplida!");
       }
     } catch (welcomeError) {
-      console.error("🚨 [MOTOR BIENVENIDA] ERROR CRÍTICO:", welcomeError);
+      console.error("🚨 Error silencioso en el mensaje de bienvenida:", welcomeError);
     }
     // ==========================================
 
@@ -152,7 +131,7 @@ exports.register = async (req, res) => {
     });
 
   } catch (error) { 
-    console.error('Error en registro:', error);
+    console.error('Error general en registro:', error);
     res.status(500).json({ error: 'Error interno del servidor.' }); 
   }
 };
