@@ -299,13 +299,139 @@ exports.deleteMessage = async (req, res) => {
 };
 
 // ==========================================
-// 7. BROADCAST (MASIVO)
+// 7. BROADCAST (MASIVO) - MOTOR REAL ACTIVADO 🚀
 // ==========================================
 exports.sendBroadcast = async (req, res) => {
   try {
-    res.status(200).json({ message: 'Bomba lanzada 🚀! Mensaje entregado a tus fans.' });
+    // 1. Identificamos al Creador que está disparando el Broadcast
+    const creatorId = req.user?.userId || req.user?.id;
+    const { content, price } = req.body;
+    
+    // 2. Procesamos el archivo multimedia (Si hay uno)
+    let mediaUrl = null;
+    if (req.file) {
+      try {
+        const result = await cloudinary.uploader.upload(req.file.path, {
+          folder: "fansmio_broadcasts",
+          resource_type: "auto" 
+        });
+        mediaUrl = result.secure_url;
+        
+        if (fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      } catch (uploadError) {
+        console.error("Error subiendo archivo de broadcast:", uploadError);
+        return res.status(500).json({ error: 'Fallo al subir el archivo a la nube.' });
+      }
+    }
+
+    // 3. BUSCAMOS A LOS FANS (El Radar)
+    // Buscamos a todos los usuarios que sigan a este creador
+    const followers = await prisma.follow.findMany({
+      where: { followingId: creatorId },
+      select: { followerId: true }
+    });
+
+    if (followers.length === 0) {
+      return res.status(400).json({ error: "No tienes fans activos para enviar este mensaje." });
+    }
+
+    // 4. PREPARAMOS LA CARGA ÚTIL
+    const isPpvBool = !!price && parseFloat(price) > 0;
+    const numPrice = isPpvBool ? parseFloat(price) : 0.0;
+    
+    // Extraemos la lista de IDs de los fans
+    const fanIds = followers.map(f => f.followerId);
+
+    // 5. ASEGURAMOS QUE EXISTAN LAS CONVERSACIONES
+    // Para enviar un mensaje, necesitamos que exista una 'Conversation' entre el creador y cada fan
+    // Buscamos las conversaciones que ya existen
+    const existingConvs = await prisma.conversation.findMany({
+      where: {
+        creatorId: creatorId,
+        fanId: { in: fanIds }
+      },
+      select: { id: true, fanId: true }
+    });
+
+    const existingFanIds = existingConvs.map(c => c.fanId);
+    
+    // Filtramos los fans que NO tienen conversación aún
+    const fansWithoutConv = fanIds.filter(id => !existingFanIds.includes(id));
+
+    // Creamos las conversaciones faltantes masivamente
+    if (fansWithoutConv.length > 0) {
+      const convsToCreate = fansWithoutConv.map(fanId => ({
+        creatorId: creatorId,
+        fanId: fanId,
+        updatedAt: new Date()
+      }));
+      await prisma.conversation.createMany({ data: convsToCreate });
+    }
+
+    // Volvemos a traer todas las conversaciones actualizadas para tener todos los IDs
+    const allConvsForBroadcast = await prisma.conversation.findMany({
+      where: { creatorId: creatorId, fanId: { in: fanIds } },
+      select: { id: true, fanId: true }
+    });
+
+    // 6. LANZAMOS LA BOMBA (Inyección Masiva de Mensajes)
+    const messagesToInsert = allConvsForBroadcast.map(conv => ({
+      conversationId: conv.id,
+      senderId: creatorId,
+      receiverId: conv.fanId,
+      content: content || null,
+      mediaUrl: mediaUrl,
+      isPPV: isPpvBool,
+      price: numPrice
+    }));
+
+    // createMany es super rápido, inserta miles de registros de golpe
+    await prisma.message.createMany({
+      data: messagesToInsert
+    });
+
+    // Actualizamos la fecha de todas las conversaciones afectadas para que suban arriba en el chat
+    const convIds = allConvsForBroadcast.map(c => c.id);
+    await prisma.conversation.updateMany({
+      where: { id: { in: convIds } },
+      data: { updatedAt: new Date() }
+    });
+
+    // 7. ENVIAMOS NOTIFICACIONES
+    const creatorInfo = await prisma.user.findUnique({ where: { id: creatorId }, select: { username: true }});
+    const notificationsToInsert = fanIds.map(fanId => ({
+      userId: fanId,
+      type: 'MESSAGE',
+      content: `Mensaje masivo de @${creatorInfo?.username || 'Creador'} 🚀`,
+      link: '/dashboard/messages'
+    }));
+
+    await prisma.notification.createMany({
+      data: notificationsToInsert
+    });
+
+    // 8. ALERTAMOS AL RADAR EN TIEMPO REAL (WebSockets)
+    try {
+      if (socketHandler && socketHandler.getIO) {
+        const io = socketHandler.getIO();
+        // Emitimos un aviso general. Cada fan conectado verá que le llegó algo.
+        fanIds.forEach(fanId => {
+           io.to(fanId).emit('alertaMasiva', { from: creatorInfo?.username });
+        });
+      }
+    } catch (e) { console.log("Socket no disponible para broadcast"); }
+
+    // 9. REPORTE DE MISIÓN
+    res.status(200).json({ 
+      success: true, 
+      message: `¡Bomba lanzada 🚀! Mensaje entregado a ${fanIds.length} fans exitosamente.` 
+    });
+
   } catch (error) {
-    res.status(500).json({ error: 'Error al enviar broadcast' });
+    console.error("🚨 Error crítico en Broadcast:", error);
+    res.status(500).json({ error: 'Fallo al procesar el envío masivo.' });
   }
 };
 
