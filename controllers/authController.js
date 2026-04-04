@@ -62,21 +62,22 @@ exports.register = async (req, res) => {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
 
-    // 5. Crear Usuario
+    // 5. Crear Usuario (🔥 MODO BYPASS ACTIVADO)
     const newUser = await prisma.user.create({
       data: {
         username: safeUsername,
-        email: cleanEmail, // Guardamos el correo súper limpio
+        email: cleanEmail,
         passwordHash: hashedPassword,
         role: role === 'CREATOR' ? 'CREATOR' : 'FAN',
         referredById: referrerId,
-        emailVerificationToken: verificationToken,
-        emailVerificationExpires: tokenExpires
+        emailVerificationToken: null, 
+        emailVerificationExpires: null,
+        isEmailVerified: true // ⚠️ Hace que no necesite verificar el correo para entrar
       }
     });
 
-    // 💌 6. ENVÍO DE CORREO CON RED DE SEGURIDAD (ANTI-FANTASMAS)
-    const verifyLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
+    // 💌 6. ENVÍO DE CORREO (APAGADO TEMPORALMENTE PARA EVITAR EL CONGELAMIENTO DE 5 MIN)
+    /* const verifyLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
     try {
       await sendEmail(
         newUser.email, 
@@ -84,11 +85,11 @@ exports.register = async (req, res) => {
         `¡Hola @${newUser.username}!\n\nEstás a un paso de entrar al imperio. Haz clic aquí (válido por 24h):\n\n${verifyLink}`
       );
     } catch (emailError) {
-      // Si el correo falla, borramos al usuario para que no quede atorado
       await prisma.user.delete({ where: { id: newUser.id } });
       console.error('🚨 Fallo SMTP, usuario eliminado para reintento:', emailError);
       return res.status(500).json({ error: 'Fallo al enviar el correo de verificación. Inténtalo de nuevo.' });
     }
+    */
 
     // 7. Crear perfil de creador si aplica
     if (newUser.role === 'CREATOR') {
