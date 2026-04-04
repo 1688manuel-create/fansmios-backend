@@ -132,73 +132,79 @@ exports.getCreatorSeries = async (req, res) => {
   }
 };
 
-// ==========================================
-// 4. COMPRAR SERIE (INTEGRACIÓN CON COVRA PAY)
-// ==========================================
 exports.buySeries = async (req, res) => {
-  try {
-    const fanId = req.user.userId;
-    const { seriesId } = req.params;
+  const fanId = req.user.userId;
+  const { seriesId } = req.params;
 
-    // Iniciar transacción de base de datos blindada
+  console.log(`🕵️‍♂️ Iniciando compra: Fan ${fanId} -> Serie ${seriesId}`);
+
+  try {
     const result = await prisma.$transaction(async (tx) => {
+      // 1. Verificar Serie
       const series = await tx.series.findUnique({ where: { id: seriesId } });
       if (!series) throw new Error('Serie no encontrada.');
+      console.log(`✅ Serie encontrada: ${series.title} - Precio: ${series.price}`);
 
-      // Verificar si ya la compró
+      // 2. Verificar si ya la tiene
       const existingPurchase = await tx.seriesPurchase.findUnique({
         where: { seriesId_fanId: { seriesId, fanId } }
       });
       if (existingPurchase) throw new Error('Ya tienes acceso a este curso.');
 
-      // Extraer billeteras
+      // 3. Cargar Billeteras
       const fanWallet = await tx.wallet.findUnique({ where: { userId: fanId } });
       const creatorWallet = await tx.wallet.findUnique({ where: { userId: series.creatorId } });
 
+      console.log(`💰 Saldo Fan: ${fanWallet?.balance} | Creador ID: ${series.creatorId}`);
+
       if (!fanWallet || fanWallet.balance < series.price) {
-        throw new Error('Saldo insuficiente en Covra Pay.');
+        throw new Error('Saldo insuficiente en tu billetera.');
       }
 
-      // Cobrar al Fan
-      await tx.wallet.update({
+      // 4. MOVIMIENTO DE DINERO (Aseguramos números limpios)
+      const price = parseFloat(series.price);
+      const platformFee = price * 0.10;
+      const creatorEarnings = price - platformFee;
+
+      // Descuento al Fan
+      const updatedFan = await tx.wallet.update({
         where: { userId: fanId },
-        data: { balance: fanWallet.balance - series.price }
+        data: { balance: { decrement: price } } // 🚀 Usamos 'decrement' para mayor precisión
       });
+      console.log(`📉 Descuento aplicado. Nuevo saldo Fan: ${updatedFan.balance}`);
 
-      // Pagar al Creador (con 10% de comisión para la plataforma)
-      const platformFee = series.price * 0.10;
-      const creatorEarnings = series.price - platformFee;
-
-      await tx.wallet.update({
+      // Pago al Creador (Se va a Pendiente por seguridad)
+      const updatedCreator = await tx.wallet.update({
         where: { userId: series.creatorId },
-        data: { pendingBalance: creatorWallet.pendingBalance + creatorEarnings }
+        data: { pendingBalance: { increment: creatorEarnings } } // 🚀 Usamos 'increment'
       });
+      console.log(`📈 Pago enviado. Nuevo saldo pendiente Creador: ${updatedCreator.pendingBalance}`);
 
-      // Registrar la compra
+      // 5. Registro de Compra
       const purchase = await tx.seriesPurchase.create({
-        data: {
-          seriesId,
-          fanId,
-          pricePaid: series.price
-        }
+        data: { seriesId, fanId, pricePaid: price }
       });
 
-      // Notificar al creador
-      await tx.notification.create({
-        data: {
-          userId: series.creatorId,
-          type: 'SALE',
-          content: `¡Nueva venta! Alguien compró tu curso "${series.title}" por $${series.price} 💰`,
-          link: '/dashboard/wallet'
-        }
-      });
+      // 6. Notificación (Si esto falla, la transacción se cancela, por eso usamos try/catch aquí)
+      try {
+        await tx.notification.create({
+          data: {
+            userId: series.creatorId,
+            type: 'SALE',
+            content: `¡Venta confirmada! Alguien compró tu curso "${series.title}" por $${price}`,
+          }
+        });
+      } catch (e) {
+        console.log("⚠️ Error en notificación (no crítico), continuando...");
+      }
 
       return purchase;
     });
 
-    res.status(200).json({ message: '¡Compra exitosa! Curso desbloqueado 🔓', purchase: result });
+    res.status(200).json({ message: '¡Compra exitosa! 🔓', purchase: result });
+
   } catch (error) {
-    console.error("Error en compra de serie:", error);
+    console.error("🚨 FALLO EN TRANSACCIÓN:", error.message);
     res.status(400).json({ error: error.message || 'Error al procesar el pago.' });
   }
 };
