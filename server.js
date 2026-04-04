@@ -17,7 +17,9 @@ const startBalanceReleaser = require('./cron/balanceReleaser');
 const cron = require('node-cron'); 
 const postController = require('./controllers/postController');
 // Importamos las rutas de estadísticas
-const statsRoutes = require('./routes/statsRoutes'); 
+const statsRoutes = require('./routes/statsRoutes');
+
+const seriesRoutes = require('./routes/seriesRoutes');
 
 // ==========================================
 // 1. INICIALIZACIÓN Y MONITOREO (Sentry)
@@ -122,6 +124,7 @@ app.use('/api/referrals', require('./routes/referralRoutes'));
 app.use('/api/stats', require('./routes/statsRoutes'));
 app.use('/api/profile/kyc', require('./routes/kycRoutes'));
 app.use('/api/2fa', require('./routes/auth2faRoutes'));
+app.use('/api/series', seriesRoutes);
 // Conectamos la puerta para que el frontend la encuentre
 app.use('/api/stats', statsRoutes);
 
