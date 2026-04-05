@@ -220,3 +220,22 @@ exports.getPublicProfile = async (req, res) => {
     res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };
+
+// 🔥 PROTOCOLO DE AUTODESTRUCCIÓN (Eliminar Cuenta)
+exports.deleteMyAccount = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    console.log(`🚨 INICIANDO PROTOCOLO DE AUTODESTRUCCIÓN PARA USER_ID: ${userId}`);
+
+    // Prisma eliminará mágicamente todo gracias al onDelete: Cascade
+    await prisma.user.delete({
+      where: { id: userId }
+    });
+
+    res.status(200).json({ message: '💥 Cuenta eliminada de la faz de FansMio.' });
+  } catch (error) {
+    console.error("❌ Error al eliminar cuenta:", error);
+    res.status(500).json({ error: 'Error al intentar eliminar la cuenta.' });
+  }
+};
