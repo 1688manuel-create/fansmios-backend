@@ -190,16 +190,18 @@ exports.getPublicProfile = async (req, res) => {
     }
     // 🌍 FIN DEL ESCUDO
 
-    // 🔥 NUEVA LÓGICA: ¿El visitante actual sigue a este creador?
+    // 🔥 NUEVA LÓGICA: ¿El visitante actual sigue o ESTÁ SUSCRITO a este creador?
     let isFollowing = false;
+    let isSubscribed = false; // 👈 NUEVO: Radar de Suscripción VIP
     
     // Como usamos optionalAuth en la ruta, req.user existe SI el visitante está logueado
     if (req.user) {
+      // 1. Revisamos si lo sigue
       const followRecord = await prisma.follow.findUnique({
         where: {
           followerId_followingId: {
             followerId: req.user.userId, // ID del visitante (Fan)
-            followingId: user.id         // ID del creador ("titi")
+            followingId: user.id         // ID del creador
           }
         }
       });
@@ -207,12 +209,28 @@ exports.getPublicProfile = async (req, res) => {
       if (followRecord) {
         isFollowing = true;
       }
+
+      // 2. 👈 NUEVO: Revisamos si está SUSCRITO
+      const subscriptionRecord = await prisma.subscription.findUnique({
+        where: {
+          fanId_creatorId: {
+            fanId: req.user.userId,
+            creatorId: user.id
+          }
+        }
+      });
+
+      // Si existe y está ACTIVA (o en periodo de gracia), encendemos la bandera VIP
+      if (subscriptionRecord && (subscriptionRecord.status === 'ACTIVE' || subscriptionRecord.status === 'PAST_DUE')) {
+        isSubscribed = true;
+      }
     }
 
-    // 🔥 Agregamos isFollowing a la respuesta para que el frontend lo sepa
+    // 🔥 Agregamos isFollowing e isSubscribed a la respuesta para que el frontend lo sepa
     res.status(200).json({ 
       profile: user,
-      isFollowing: isFollowing 
+      isFollowing: isFollowing,
+      isSubscribed: isSubscribed // 👈 La llave mágica para ocultar el botón de pago
     });
     
   } catch (error) {
