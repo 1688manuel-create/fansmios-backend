@@ -181,38 +181,55 @@ exports.getWithdrawalHistory = async (req, res) => {
   }
 };
 
-// 🔥 LA CONSULTA MAESTRA DEL DASHBOARD (REESCRITA)
+// 🔥 LA CONSULTA MAESTRA DEL DASHBOARD (REESCRITA Y BLINDADA)
 exports.getDashboard = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    // 1. Buscamos al usuario (para saber si es fan o creador y ver sus créditos)
+    // 1. Buscamos al usuario
     const user = await prisma.user.findUnique({
       where: { id: userId }
     });
 
-    // 2. Buscamos la bóveda real (para ver ganancias de creador)
+    // 2. Buscamos la bóveda real
     const wallet = await prisma.wallet.findUnique({
       where: { userId: userId }
     });
 
-    // 🛡️ FIX 1: Lógica Dinámica de Saldo
-    // Si es Creador ve la plata ganada. Si es Fan, ve sus créditos listos para gastar.
+    // 3. 🎯 LA CALCULADORA DEL HISTÓRICO FACTURADO
+    // Suma todo el dinero (neto) que haya ingresado al creador
+    const totalEarnedAggr = await prisma.transaction.aggregate({
+      where: {
+        receiverId: userId,
+        status: { in: ['COMPLETED', 'PENDING'] }, // Dinero seguro o en cuarentena
+        type: { in: ['TIP', 'SUBSCRIPTION', 'PPV_POST', 'PPV_MESSAGE', 'BUNDLE', 'LIVE_TICKET'] } // 👈 ¡Incluimos BUNDLE de la academia!
+      },
+      _sum: {
+        netAmount: true 
+      }
+    });
+    const totalEarnedHistorial = totalEarnedAggr._sum.netAmount || 0;
+
+    // 4. 🎯 HISTORIAL DE RETIROS (Para la tabla inferior derecha)
+    const withdrawalHistory = await prisma.withdrawal.findMany({
+      where: { creatorId: userId },
+      orderBy: { createdAt: 'desc' },
+      take: 5
+    });
+
+    // 5. Lógica Dinámica de Saldo
     const isCreator = user?.role === 'CREATOR' || user?.role === 'ADMIN';
     const displayBalance = isCreator ? (wallet?.balance || 0) : (user?.walletBalance || 0);
 
-    // 🛡️ FIX 2: Visión Total de Transacciones
-    // Buscamos sin filtro estricto de "status" para evitar que se oculten propinas
+    // 6. Visión Total de Transacciones
     const recentTransactions = await prisma.transaction.findMany({
       where: {
         OR: [
-          { senderId: userId },   // 👈 Lo que tú GASTAS
-          { receiverId: userId }  // 👈 Lo que tú RECIBES
+          { senderId: userId },
+          { receiverId: userId }
         ]
       },
-      orderBy: { 
-        createdAt: 'desc' 
-      },
+      orderBy: { createdAt: 'desc' },
       take: 20,
       include: {
         sender: { select: { username: true } },
@@ -220,13 +237,21 @@ exports.getDashboard = async (req, res) => {
       }
     });
 
+    // 7. Mapeo táctico (Le avisamos al frontend qué es ingreso y qué es gasto)
+    const mappedTransactions = recentTransactions.map(tx => ({
+      ...tx,
+      isIncome: tx.receiverId === userId && tx.type !== 'CREDIT_TOPUP'
+    }));
+
     res.status(200).json({
       wallet: {
         balance: displayBalance,
         pendingBalance: wallet?.pendingBalance || 0,
         cryptoAddress: wallet?.cryptoAddress || null
       },
-      recentTransactions: recentTransactions
+      totalEarnedHistorial: totalEarnedHistorial, // 👈 ¡EL NÚMERO MÁGICO ENVIADO AL FRONTEND!
+      withdrawalHistory: withdrawalHistory,       // 👈 ¡LOS RETIROS ENVIADOS AL FRONTEND!
+      recentTransactions: mappedTransactions
     });
 
   } catch (error) {
