@@ -38,15 +38,13 @@ async function loadModels() {
 }
 
 // =======================
-// 🤖 OCR
+// 🤖 OCR (Blindado / Punteado)
 // =======================
 async function extractText(imagePath) {
-  try {
-    const { data: { text } } = await Tesseract.recognize(imagePath, 'spa');
-    return text;
-  } catch {
-    return null;
-  }
+  // Tesseract causa un colapso de hilos en Docker al intentar descargar diccionarios.
+  // Lo puenteamos para proteger la RAM y pasar directo a la IA Facial.
+  console.log("🛡️ [OCR] Omitiendo lectura de texto para proteger el hilo principal...");
+  return null;
 }
 
 // =======================
