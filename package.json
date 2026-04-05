@@ -17,6 +17,7 @@
     "@mux/mux-node": "^12.8.1",
     "@prisma/client": "^6.19.2",
     "@sentry/node": "^10.39.0",
+    "@tensorflow/tfjs-node": "^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
     "axios": "^1.13.6",
     "bcrypt": "^6.0.0",
