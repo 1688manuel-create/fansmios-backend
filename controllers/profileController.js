@@ -221,14 +221,19 @@ exports.getPublicProfile = async (req, res) => {
   }
 };
 
-// 🔥 PROTOCOLO DE AUTODESTRUCCIÓN (Eliminar Cuenta)
+// 🔥 PROTOCOLO DE AUTODESTRUCCIÓN (Eliminar Cuenta Blindado)
 exports.deleteMyAccount = async (req, res) => {
   try {
     const userId = req.user.userId;
 
     console.log(`🚨 INICIANDO PROTOCOLO DE AUTODESTRUCCIÓN PARA USER_ID: ${userId}`);
 
-    // Prisma eliminará mágicamente todo gracias al onDelete: Cascade
+    // 1. ELIMINAR OBSTÁCULOS MANUALMENTE (Cupones huérfanos)
+    await prisma.coupon.deleteMany({
+      where: { creatorId: userId }
+    });
+
+    // 2. DETONAR LA CUENTA (Prisma hará el 'Cascade' con todo lo demás)
     await prisma.user.delete({
       where: { id: userId }
     });
