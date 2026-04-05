@@ -132,7 +132,44 @@ exports.getCreatorSeries = async (req, res) => {
   }
 };
 
-// B) PAGO AL CREADOR (Aseguramos que la billetera exista y sumamos)
+// ==========================================
+// 4. COMPRAR SERIE (INTEGRACIÓN CON COVRA PAY)
+// ==========================================
+exports.buySeries = async (req, res) => {
+  const fanId = req.user.userId;
+  const { seriesId } = req.params;
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Validar Serie
+      const series = await tx.series.findUnique({ where: { id: seriesId } });
+      if (!series) throw new Error('Serie no encontrada.');
+
+      // 2. Verificar compra previa
+      const existingPurchase = await tx.seriesPurchase.findUnique({
+        where: { seriesId_fanId: { seriesId, fanId } }
+      });
+      if (existingPurchase) throw new Error('Ya tienes acceso a este curso.');
+
+      // 3. Cargar Billetera
+      const fanWallet = await tx.wallet.findUnique({ where: { userId: fanId } });
+
+      if (!fanWallet || fanWallet.balance < series.price) {
+        throw new Error('Saldo insuficiente en Covra Pay.');
+      }
+
+      // 4. CÁLCULOS FINANCIEROS
+      const price = parseFloat(series.price);
+      const platformFee = parseFloat((price * 0.10).toFixed(2)); // 10% comisión
+      const creatorEarnings = parseFloat((price - platformFee).toFixed(2));
+
+      // A) DESCUENTO AL FAN
+      await tx.wallet.update({
+        where: { userId: fanId },
+        data: { balance: { decrement: price } }
+      });
+
+      // B) PAGO AL CREADOR (Aseguramos que la billetera exista y sumamos)
       await tx.wallet.upsert({
         where: { userId: series.creatorId },
         update: { pendingBalance: { increment: creatorEarnings } },
@@ -175,3 +212,37 @@ exports.getCreatorSeries = async (req, res) => {
           netAmount: creatorEarnings
         }
       });
+
+      // Recibo para el Creador (Ingreso)
+      await tx.transaction.create({
+        data: {
+          senderId: fanId,
+          receiverId: series.creatorId,
+          amount: price,
+          type: 'BUNDLE', // Usamos BUNDLE porque está en tu enum
+          status: 'PENDING',
+          attachedMessage: `Venta de academia VIP: ${series.title}`,
+          platformFee: platformFee,
+          netAmount: creatorEarnings
+        }
+      });
+
+      // E) NOTIFICACIÓN AL CREADOR
+      await tx.notification.create({
+        data: {
+          userId: series.creatorId,
+          type: 'SALE',
+          content: `¡Felicidades! Alguien compró tu curso "${series.title}". Ganaste $${creatorEarnings} USD.`
+        }
+      });
+
+      return purchase;
+    });
+
+    res.status(200).json({ message: '¡Compra exitosa! 🔓', purchase: result });
+
+  } catch (error) {
+    console.error("🚨 ERROR FINANCIERO:", error.message);
+    res.status(400).json({ error: error.message || 'Error al procesar el pago.' });
+  }
+};
