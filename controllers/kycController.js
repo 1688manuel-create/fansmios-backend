@@ -5,7 +5,6 @@ const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
 const path = require('path');
 
-const Tesseract = require('tesseract.js');
 const faceapi = require('@vladmandic/face-api');
 const canvas = require('canvas');
 const ffmpeg = require('fluent-ffmpeg');
@@ -14,14 +13,14 @@ const sharp = require('sharp');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// 🔥 BYPASS: Configuramos face-api en modo "puro JS" para evitar node-gyp
+// 🔥 BYPASS: Modo "puro JS" para evitar caídas de servidor
 const { Canvas, Image, ImageData } = canvas;
 faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
 
 let modelsLoaded = false;
 
 // =======================
-// 🔥 LOAD MODELS (Cargado en memoria global para no saturar CPU)
+// 🔥 LOAD MODELS (Cargado en memoria)
 // =======================
 async function loadModels() {
   if (modelsLoaded) return;
@@ -31,37 +30,14 @@ async function loadModels() {
     await faceapi.nets.faceLandmark68Net.loadFromDisk(path.join(__dirname, '../models'));
     await faceapi.nets.faceRecognitionNet.loadFromDisk(path.join(__dirname, '../models'));
     modelsLoaded = true;
-    console.log("Modelos IA cargados y listos.");
+    console.log("✅ Modelos IA cargados y listos.");
   } catch (error) {
-    console.error("Error crítico cargando modelos IA:", error);
+    console.error("❌ Error crítico cargando modelos IA:", error);
   }
 }
 
 // =======================
-// 🤖 OCR (Blindado / Punteado)
-// =======================
-async function extractText(imagePath) {
-  // Tesseract causa un colapso de hilos en Docker al intentar descargar diccionarios.
-  // Lo puenteamos para proteger la RAM y pasar directo a la IA Facial.
-  console.log("🛡️ [OCR] Omitiendo lectura de texto para proteger el hilo principal...");
-  return null;
-}
-
-// =======================
-// 🧠 PARSE ID
-// =======================
-function parseId(text) {
-  if (!text) return null;
-  const nameMatch = text.match(/NOMBRE\s+([A-Z\s]+)/);
-  const curpMatch = text.match(/[A-Z]{4}\d{6}[A-Z]{6}\d{2}/);
-  return {
-    fullName: nameMatch?.[1]?.trim() || null,
-    curp: curpMatch?.[0] || null
-  };
-}
-
-// =======================
-// 🎬 EXTRAER FRAMES (Blindado contra bloqueos)
+// 🎬 EXTRAER FRAMES
 // =======================
 function extractFrames(videoPath) {
   return new Promise((resolve, reject) => {
@@ -78,7 +54,7 @@ function extractFrames(videoPath) {
         reject(err);
       })
       .screenshots({
-        count: 5, // Reducido a 5 para no asesinar la CPU en producción
+        count: 5,
         folder: dir,
         size: '320x240'
       });
@@ -100,14 +76,14 @@ async function getDescriptor(imgPath) {
 }
 
 // =======================
-// 🧹 CLEANUP (A prueba de balas)
+// 🧹 CLEANUP
 // =======================
 function cleanup(files, dir) {
   try {
     files.forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
     if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
   } catch (e) {
-    console.error("Error limpiando basura de frames:", e);
+    console.error("Error limpiando basura:", e);
   }
 }
 
@@ -118,39 +94,33 @@ exports.uploadKycDocuments = async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    if (!req.files?.idFront || !req.files?.idBack || !req.files?.idSelfie) {
-      return res.status(400).json({ error: "Faltan archivos para el análisis KYC." });
+    // 1. Verificar si Multer nos mandó los archivos
+    if (!req.files || !req.files.idFront || !req.files.idBack || !req.files.idSelfie) {
+      return res.status(400).json({ error: "Faltan archivos biométricos para el análisis KYC." });
     }
 
-    // 🔥 FIX CRÍTICO: Agregados los para leer los archivos correctamente desde Multer
-    const idFront = req.files.idFront;
-    const idBack = req.files.idBack;
-    const selfie = req.files.idSelfie;
+    // 🔥 FIX CRÍTICO: Los son obligatorios para que Cloudinary y FFMPEG no exploten
+    const idFront = req.files.idFront[0];
+    const idBack = req.files.idBack[0];
+    const selfie = req.files.idSelfie[0];
 
-    console.log(`[KYC] Iniciando análisis profundo para Usuario ${userId}...`);
+    console.log(`🛡️ [KYC] Iniciando análisis profundo para Usuario ${userId}...`);
 
-    // 1. OCR (Extraer Texto del ID)
-    const text = await extractText(idFront.path);
-    const parsed = parseId(text);
-
-    // 2. EXTRAER FRAMES DEL VIDEO
     let faceMatchConfidence = 0;
     let livenessScore = 0;
     let deepfakeScore = 0;
     let inconsistencies = 0;
 
+    // 2. MOTOR DE INTELIGENCIA ARTIFICIAL
     try {
+      console.log("🎥 Analizando video y extrayendo biometría...");
       const { files, dir } = await extractFrames(selfie.path);
-      
-      // Procesar Identificación
       const idDesc = await getDescriptor(idFront.path);
-      
+
       let detectedFaces = 0;
       let prevBrightness = null;
 
-      // Analizar cada frame extraído
       for (const f of files) {
-        // Deepfake / Liveness básico
         const image = await sharp(f).greyscale().raw().toBuffer({ resolveWithObject: true });
         const avg = image.data.reduce((a, b) => a + b, 0) / image.data.length;
         if (prevBrightness !== null) {
@@ -158,7 +128,6 @@ exports.uploadKycDocuments = async (req, res) => {
         }
         prevBrightness = avg;
 
-        // Face Match
         const frameDesc = await getDescriptor(f);
         if (frameDesc) {
           detectedFaces++;
@@ -171,34 +140,40 @@ exports.uploadKycDocuments = async (req, res) => {
 
       livenessScore = files.length > 0 ? (detectedFaces / files.length) : 0;
       deepfakeScore = files.length > 0 ? (1 - (inconsistencies / files.length)) : 0;
-      
+
       cleanup(files, dir);
+      console.log("✅ Análisis IA completado exitosamente.");
     } catch (e) {
-      console.error("Fallo en el análisis de video KYC:", e);
-      // Fallback si falla ffmpeg para no bloquear al usuario por error de servidor
+      console.error("⚠️ Fallo interno en el motor de IA:", e);
+      // Fallback seguro si el video está dañado
       faceMatchConfidence = 0.5; livenessScore = 0.5; deepfakeScore = 0.5;
     }
 
     // 3. SUBIR A CLOUDINARY
+    console.log("☁️ Transfiriendo expedientes a la nube de seguridad...");
     const upload = (file, type) => cloudinary.uploader.upload(file.path, { folder: 'kyc_secure', resource_type: type });
+    
     const [frontRes, backRes, selfieRes] = await Promise.all([
-      upload(idFront, 'image'), upload(idBack, 'image'), upload(selfie, 'video')
+      upload(idFront, 'image'), 
+      upload(idBack, 'image'), 
+      upload(selfie, 'video')
     ]);
 
-    // Limpiar archivos locales pesados
+    // Limpiar archivos locales pesados del servidor Coolify
     [idFront.path, idBack.path, selfie.path].forEach(p => { if (fs.existsSync(p)) fs.unlink(p, () => {}); });
 
-    // 4. 📊 MOTOR DE RIESGO (Risk Engine)
+    // 4. 📊 MOTOR DE RIESGO
     const riskScore = (faceMatchConfidence * 0.5) + (livenessScore * 0.3) + (deepfakeScore * 0.2);
-    
+    console.log(`📊 [KYC] Score Final Calculado: ${riskScore}`);
+
     const status = riskScore > 0.75 ? 'PENDING' : riskScore > 0.55 ? 'REVIEW' : 'REJECTED';
 
-    // 5. GUARDAR EN PRISMA
+    // 5. GUARDAR EN LA BASE DE DATOS
     await prisma.creatorProfile.upsert({
       where: { userId },
       update: {
         kycStatus: status,
-        idDocumentUrl: `${frontRes.secure_url},${backRes.secure_url}`, 
+        idDocumentUrl: `${frontRes.secure_url},${backRes.secure_url}`,
         idSelfieUrl: selfieRes.secure_url,
       },
       create: {
@@ -209,10 +184,10 @@ exports.uploadKycDocuments = async (req, res) => {
       }
     });
 
-    res.json({ message: "KYC procesado", status, riskScore, faceMatchConfidence });
+    res.json({ message: "Expediente KYC procesado con éxito", status, riskScore, faceMatchConfidence });
 
   } catch (err) {
     console.error("❌ ERROR FATAL KYC:", err);
-    res.status(500).json({ error: "Error procesando el expediente de seguridad." });
+    res.status(500).json({ error: "Error de servidor al guardar el expediente de seguridad." });
   }
 };
