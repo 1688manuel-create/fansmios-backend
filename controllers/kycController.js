@@ -129,9 +129,6 @@ exports.uploadKycDocuments = async (req, res) => {
     const idBack = req.files.idBack;
     const selfie = req.files.idSelfie;
 
-    if (!idFront.mimetype.startsWith('image')) return res.status(400).json({ error: "ID Frente inválido" });
-    if (!selfie.mimetype.startsWith('video')) return res.status(400).json({ error: "Video inválido" });
-
     console.log(`[KYC] Iniciando análisis profundo para Usuario ${userId}...`);
 
     // 1. OCR (Extraer Texto del ID)
