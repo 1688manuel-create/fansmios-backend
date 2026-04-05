@@ -14,6 +14,7 @@ const sharp = require('sharp');
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
+// 🔥 BYPASS: Configuramos face-api en modo "puro JS" para evitar node-gyp
 const { Canvas, Image, ImageData } = canvas;
 faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
 
