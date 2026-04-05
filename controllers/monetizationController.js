@@ -65,6 +65,9 @@ exports.subscribeToCreator = async (req, res) => {
     const endDate = new Date();
     endDate.setMonth(endDate.getMonth() + 1);
 
+    // 🔥 Variable para guardar el resultado y mandarlo al frontend
+    let subscriptionData = null;
+
     await prisma.$transaction(async (tx) => {
       // Si usamos un descuento, le sumamos 1 a su contador de usos
       if (appliedDiscount) {
@@ -75,12 +78,12 @@ exports.subscribeToCreator = async (req, res) => {
       }
 
       if (existingSub) {
-        await tx.subscription.update({
+        subscriptionData = await tx.subscription.update({
           where: { id: existingSub.id },
           data: { status: 'ACTIVE', price: finalPrice, startDate, endDate }
         });
       } else {
-        await tx.subscription.create({
+        subscriptionData = await tx.subscription.create({
           data: { fanId, creatorId, price: finalPrice, startDate, endDate, status: 'ACTIVE' }
         });
       }
@@ -105,7 +108,13 @@ exports.subscribeToCreator = async (req, res) => {
     });
 
     const msg = appliedDiscount ? `¡Suscripción exitosa con descuento del ${appliedDiscount.discountPercent}%! 🎉` : '¡Suscripción exitosa! 🎉';
-    res.status(200).json({ message: msg });
+    
+    // 🔥 Le mandamos la 'subscriptionData' al frontend para que destrabe la pantalla
+    res.status(200).json({ 
+      message: msg,
+      subscription: subscriptionData 
+    });
+
   } catch (error) {
     console.error('Error al suscribirse:', error);
     res.status(500).json({ error: 'Error interno procesando el pago.' });
