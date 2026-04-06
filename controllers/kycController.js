@@ -10,8 +10,10 @@ const canvas = require('canvas');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const sharp = require('sharp');
+const ffprobePath = require('ffprobe-static').path; // 👈 1. Importamos ffprobe
 
 ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath); // 👈 2. Le ponemos los lentes de rayos X al motor
 
 // 🔥 BYPASS: Modo "puro JS" para evitar caídas de servidor
 const { Canvas, Image, ImageData } = canvas;
