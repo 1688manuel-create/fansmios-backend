@@ -1,23 +1,25 @@
-// backend/controllers/adminKycController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // ==========================================
-// 1. OBTENER LA LISTA DE SOSPECHOSOS (Pendientes)
+// 1. OBTENER EL HISTORIAL FORENSE COMPLETO
 // ==========================================
 exports.getPendingKyc = async (req, res) => {
   try {
-    const pendingProfiles = await prisma.creatorProfile.findMany({
-      where: { kycStatus: 'PENDING' },
+    // 🔥 Ahora traemos TODOS los que han intentado el KYC para el historial
+    const profiles = await prisma.creatorProfile.findMany({
+      where: { 
+        kycStatus: { in: ['PENDING', 'APPROVED', 'REJECTED'] } 
+      },
       include: {
         user: { select: { username: true, email: true, name: true, createdAt: true } }
       },
-      orderBy: { updatedAt: 'asc' } // Los más antiguos primero
+      orderBy: { updatedAt: 'desc' } // Los más recientes primero
     });
 
-    res.status(200).json({ profiles: pendingProfiles });
+    res.status(200).json({ profiles });
   } catch (error) {
-    console.error("Error al obtener KYC pendientes:", error);
+    console.error("Error al obtener KYC:", error);
     res.status(500).json({ error: "Error interno del servidor." });
   }
 };
@@ -27,87 +29,66 @@ exports.getPendingKyc = async (req, res) => {
 // ==========================================
 exports.approveKyc = async (req, res) => {
   try {
-    // 🔥 BLINDAJE: Aceptamos el ID tanto de params como del body (Modo Dios compatible)
     const profileId = req.params.profileId || req.body.profileId || req.body.id;
-
-    if (!profileId) {
-      return res.status(400).json({ error: 'ID de expediente no proporcionado.' });
-    }
+    if (!profileId) return res.status(400).json({ error: 'ID no proporcionado.' });
 
     const profile = await prisma.creatorProfile.findUnique({ where: { id: profileId } });
-    if (!profile || profile.kycStatus !== 'PENDING') {
-      return res.status(400).json({ error: 'El expediente no existe o ya fue procesado.' });
-    }
+    if (!profile) return res.status(400).json({ error: 'Expediente no existe.' });
 
-    // 🔒 Transacción: Aprobamos y notificamos
     await prisma.$transaction(async (tx) => {
       await tx.creatorProfile.update({
         where: { id: profileId },
-        data: { kycStatus: 'APPROVED', kycRejectionReason: null }
+        data: { kycStatus: 'APPROVED', kycRejectionReason: null } // Limpiamos la razón si antes fue rechazado
       });
 
       await tx.notification.create({
         data: {
           userId: profile.userId,
           type: 'kyc_approved',
-          content: `✅ ¡Felicidades! Tu Identidad Oficial ha sido verificada. Ya puedes realizar retiros.`,
-          link: '/dashboard/wallet' // Funciona perfecto en fansmio.com
+          content: `✅ ¡Felicidades! Tu Identidad Oficial ha sido verificada.`,
+          link: '/dashboard/wallet'
         }
       });
     });
 
-    res.status(200).json({ message: 'Identidad aprobada con éxito. El creador ya puede cobrar. 💸' });
+    res.status(200).json({ message: 'Identidad aprobada con éxito.' });
   } catch (error) {
-    console.error("Error al aprobar KYC:", error);
     res.status(500).json({ error: "Error al procesar la aprobación." });
   }
 };
 
 // ==========================================
-// ❌ 3. RECHAZAR IDENTIDAD (El Martillazo)
+// ❌ 3. RECHAZAR IDENTIDAD (Con Razón Específica)
 // ==========================================
 exports.rejectKyc = async (req, res) => {
   try {
-    // 🔥 BLINDAJE: Aceptamos ID y Razón de múltiples fuentes
     const profileId = req.params.profileId || req.body.profileId || req.body.id;
     const rejectionReason = req.body.reason || req.body.adminNotes || req.body.message;
 
-    if (!profileId) {
-      return res.status(400).json({ error: 'ID de expediente no proporcionado.' });
-    }
-
-    if (!rejectionReason) {
-      return res.status(400).json({ error: 'Debes proporcionar una razón clara para el rechazo.' });
-    }
+    if (!profileId) return res.status(400).json({ error: 'ID no proporcionado.' });
+    if (!rejectionReason) return res.status(400).json({ error: 'Falta la razón del rechazo.' });
 
     const profile = await prisma.creatorProfile.findUnique({ where: { id: profileId } });
-    if (!profile || profile.kycStatus !== 'PENDING') {
-      return res.status(400).json({ error: 'El expediente no existe o ya fue procesado.' });
-    }
+    if (!profile) return res.status(400).json({ error: 'Expediente no existe.' });
 
-    // 🔒 Transacción: Rechazamos y notificamos
     await prisma.$transaction(async (tx) => {
       await tx.creatorProfile.update({
         where: { id: profileId },
-        data: { 
-          kycStatus: 'REJECTED', 
-          kycRejectionReason: rejectionReason
-        }
+        data: { kycStatus: 'REJECTED', kycRejectionReason: rejectionReason }
       });
 
       await tx.notification.create({
         data: {
           userId: profile.userId,
           type: 'kyc_rejected',
-          content: `❌ Tu verificación de identidad falló. Razón: ${rejectionReason}. Por favor, vuelve a intentarlo.`,
-          link: '/dashboard/kyc' // Funciona perfecto en fansmio.com
+          content: `❌ Verificación fallida. Razón: ${rejectionReason}. Por favor, vuelve a intentarlo.`,
+          link: '/dashboard/kyc'
         }
       });
     });
 
-    res.status(200).json({ message: 'Expediente rechazado. El usuario ha sido notificado. 🛡️' });
+    res.status(200).json({ message: 'Expediente rechazado.' });
   } catch (error) {
-    console.error("Error al rechazar KYC:", error);
-    res.status(500).json({ error: "Error interno al rechazar el KYC." });
+    res.status(500).json({ error: "Error al rechazar el KYC." });
   }
 };

@@ -218,6 +218,10 @@ model CreatorProfile {
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // 🔥 NUEVOS CAMPOS: La telemetría de la IA para el Modo Dios
+  kycRiskScore        Float?
+  kycFaceMatch        Float?
+
   instagram    String?
   twitter      String?
   website      String?

@@ -183,12 +183,16 @@ exports.uploadKycDocuments = async (req, res) => {
         kycStatus: status,
         idDocumentUrl: `${frontRes.secure_url},${backRes.secure_url}`,
         idSelfieUrl: selfieRes.secure_url,
+        kycRiskScore: riskScore,               // 👈 NUEVO
+        kycFaceMatch: faceMatchConfidence      // 👈 NUEVO
       },
       create: {
         userId,
         kycStatus: status,
         idDocumentUrl: `${frontRes.secure_url},${backRes.secure_url}`,
         idSelfieUrl: selfieRes.secure_url,
+        kycRiskScore: riskScore,               // 👈 NUEVO
+        kycFaceMatch: faceMatchConfidence      // 👈 NUEVO
       }
     });
 
