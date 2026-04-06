@@ -173,7 +173,8 @@ exports.uploadKycDocuments = async (req, res) => {
     const riskScore = (faceMatchConfidence * 0.5) + (livenessScore * 0.3) + (deepfakeScore * 0.2);
     console.log(`📊 [KYC] Score Final Calculado: ${riskScore}`);
 
-    const status = riskScore > 0.75 ? 'PENDING' : riskScore > 0.55 ? 'REVIEW' : 'REJECTED';
+    // 🔥 FIX: Prisma solo acepta PENDING, APPROVED o REJECTED. Fusionamos REVIEW dentro de PENDING.
+    const status = riskScore > 0.55 ? 'PENDING' : 'REJECTED';
 
     // 5. GUARDAR EN LA BASE DE DATOS
     await prisma.creatorProfile.upsert({
