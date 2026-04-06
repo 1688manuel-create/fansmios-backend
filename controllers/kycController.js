@@ -22,19 +22,24 @@ faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
 let modelsLoaded = false;
 
 // =======================
-// 🔥 LOAD MODELS (Cargado en memoria)
+// 🔥 LOAD MODELS (Cargado directo desde la Nube/CDN)
 // =======================
 async function loadModels() {
   if (modelsLoaded) return;
   try {
-    console.log("Cargando Modelos de IA Facial...");
-    await faceapi.nets.ssdMobilenetv1.loadFromDisk(path.join(__dirname, '../models'));
-    await faceapi.nets.faceLandmark68Net.loadFromDisk(path.join(__dirname, '../models'));
-    await faceapi.nets.faceRecognitionNet.loadFromDisk(path.join(__dirname, '../models'));
+    console.log("Cargando Modelos de IA Facial desde la Nube Segura...");
+    
+    // 🔥 La IA bajará su cerebro desde un CDN oficial (Ya no necesita la carpeta models)
+    const MODEL_URL = 'https://vladmandic.github.io/face-api/model/';
+    
+    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+    
     modelsLoaded = true;
-    console.log("✅ Modelos IA cargados y listos.");
+    console.log("✅ Modelos IA descargados y listos para operar.");
   } catch (error) {
-    console.error("❌ Error crítico cargando modelos IA:", error);
+    console.error("❌ Error crítico conectando con los modelos IA:", error);
   }
 }
 
