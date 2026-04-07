@@ -2,22 +2,64 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // ==========================================
-// 1. OBTENER EL HISTORIAL FORENSE COMPLETO
+// 1. OBTENER EL HISTORIAL FORENSE (NIVEL DIOS - ESCALABLE)
 // ==========================================
 exports.getPendingKyc = async (req, res) => {
   try {
-    // 🔥 Ahora traemos TODOS los que han intentado el KYC para el historial
-    const profiles = await prisma.creatorProfile.findMany({
-      where: { 
-        kycStatus: { in: ['PENDING', 'APPROVED', 'REJECTED'] } 
-      },
-      include: {
-        user: { select: { username: true, email: true, name: true, createdAt: true } }
-      },
-      orderBy: { updatedAt: 'desc' } // Los más recientes primero
-    });
+    // 1. Recibimos las órdenes del radar (Frontend)
+    const { status = 'PENDING', search = '', page = 1, limit = 10 } = req.query;
+    
+    // 2. Matemáticas de Paginación (Skip y Take)
+    const skip = (Number(page) - 1) * Number(limit);
+    const take = Number(limit);
 
-    res.status(200).json({ profiles });
+    // 3. Armamos la trampa (Filtros de base de datos)
+    const whereClause = {
+      kycStatus: status,
+    };
+
+    // Si el CEO está buscando a alguien, buscamos por username o email ignorando mayúsculas
+    if (search) {
+      whereClause.user = {
+        OR: [
+          { username: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } }
+        ]
+      };
+    }
+
+    // 4. Ejecutamos 4 consultas al mismo tiempo de forma paralela (Súper rápido)
+    const [profiles, totalFiltered, pendingCount, approvedCount, rejectedCount] = await Promise.all([
+      prisma.creatorProfile.findMany({
+        where: whereClause,
+        include: {
+          user: { select: { username: true, email: true, name: true, createdAt: true } }
+        },
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take,
+      }),
+      prisma.creatorProfile.count({ where: whereClause }),
+      prisma.creatorProfile.count({ where: { kycStatus: 'PENDING' } }),
+      prisma.creatorProfile.count({ where: { kycStatus: 'APPROVED' } }),
+      prisma.creatorProfile.count({ where: { kycStatus: 'REJECTED' } })
+    ]);
+
+    // 5. Devolvemos la artillería completa
+    res.status(200).json({ 
+      profiles, 
+      pagination: {
+        total: totalFiltered,
+        totalPages: Math.ceil(totalFiltered / take),
+        currentPage: Number(page),
+        limit: take
+      },
+      counts: {
+        PENDING: pendingCount,
+        APPROVED: approvedCount,
+        REJECTED: rejectedCount
+      }
+    });
   } catch (error) {
     console.error("Error al obtener KYC:", error);
     res.status(500).json({ error: "Error interno del servidor." });
