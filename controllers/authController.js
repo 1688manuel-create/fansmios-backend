@@ -191,6 +191,12 @@ exports.login = async (req, res) => {
       data: { userId: user.id, refreshToken: refreshToken, deviceInfo: deviceInfo, ipAddress: ipAddress, expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }
     });
 
+    // 🔥 Reseteamos el reloj de inactividad del usuario
+    await prisma.user.update({
+      where: { id: user.id }, // O el nombre de tu variable de usuario
+      data: { lastLoginAt: new Date() }
+    });
+
     res.status(200).json({
       message: 'Login exitoso',
       token: accessToken, 

@@ -13,7 +13,8 @@ const { AccessToken } = require('livekit-server-sdk');
 
 // Importación de Tareas en Segundo Plano (Cron Jobs)
 const { startSubscriptionCron } = require('./utils/subscriptionCron'); 
-const startBalanceReleaser = require('./cron/balanceReleaser'); 
+const startBalanceReleaser = require('./cron/balanceReleaser');
+const startAccountGuardian = require('./cron/accountGuardian'); // 👈 Importas el nuevo 
 const cron = require('node-cron'); 
 const postController = require('./controllers/postController');
 // Importamos las rutas de estadísticas
@@ -166,7 +167,8 @@ Sentry.setupExpressErrorHandler(app);
 
 // 🤖 ENCENDIDO DE CRON JOBS (ROBOTS EN SEGUNDO PLANO)
 startSubscriptionCron(); 
-startBalanceReleaser(); 
+startBalanceReleaser();
+startAccountGuardian(); // 👈 ¡LISTO! El Guardián ya patrulla a las 3 AM 
 console.log('🤖 Motores de Automatización (Suscripciones y Saldos) Activados.');
 
 // 🔥 EL PERRO GUARDIÁN: Patrulla Anti-IA todos los días a las 3:00 AM
