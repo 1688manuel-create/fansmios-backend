@@ -18,7 +18,7 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado, saltando validación...");
 }
 
-// 🔥 NUEVO RADAR ESTRICTO (Soporta URLs de Cloudinary y Archivos Locales)
+// 🔥 NUEVO RADAR ESTRICTO (Corrección de ruta para videos)
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
     console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
@@ -27,8 +27,10 @@ const scanContentStrict = async (filePath, mimetype) => {
 
   try {
     const isVideo = mimetype && mimetype.startsWith('video/');
+    
+    // 🔥 FIX APLICADO: El endpoint correcto para videos MP4 es check-sync.json
     const endpoint = isVideo 
-      ? 'https://api.sightengine.com/1.0/video/sync.json' 
+      ? 'https://api.sightengine.com/1.0/video/check-sync.json' 
       : 'https://api.sightengine.com/1.0/check.json';
 
     let response;
@@ -41,7 +43,7 @@ const scanContentStrict = async (filePath, mimetype) => {
           models: 'gore,weapon,minors,genai',
           api_user: process.env.SIGHTENGINE_USER,
           api_secret: process.env.SIGHTENGINE_SECRET,
-          [isVideo ? 'stream_url' : 'url']: filePath // Sightengine usa stream_url para videos
+          url: filePath // Usamos 'url' para que Sightengine descargue el MP4
         }
       });
     } else {
