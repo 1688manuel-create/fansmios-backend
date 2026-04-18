@@ -18,7 +18,7 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado, saltando validación...");
 }
 
-// 🔥 NUEVO RADAR ESTRICTO (Modelos Oficiales de Sightengine)
+// 🔥 NUEVO RADAR ESTRICTO (Hack para Plan Gratuito usando Cloudinary)
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
     console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
@@ -27,28 +27,41 @@ const scanContentStrict = async (filePath, mimetype) => {
 
   try {
     const isVideo = mimetype && mimetype.startsWith('video/');
-    const endpoint = isVideo 
-      ? 'https://api.sightengine.com/1.0/video/check-sync.json' 
-      : 'https://api.sightengine.com/1.0/check.json';
-
-    let response;
     const isUrl = filePath.startsWith('http');
-
-    // 🔥 FIX: Modelos correctos ('wad' = Armas, 'gore' = Violencia, 'genai' = Inteligencia Artificial)
+    
+    // SIEMPRE usaremos el endpoint de imágenes (check.json) porque es el gratuito.
+    const endpoint = 'https://api.sightengine.com/1.0/check.json';
     const activeModels = 'gore,wad,genai'; 
 
+    let targetUrl = filePath;
+
+    // 🔥 EL TRUCO DE MAGIA: Si es un video de Cloudinary, le cambiamos la extensión a .jpg
+    // Cloudinary nos devolverá un fotograma estático del video, y Sightengine lo escaneará GRATIS.
+    if (isVideo && isUrl) {
+      targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg');
+      console.log(`📸 Extrayendo fotograma para escaneo gratuito: ${targetUrl}`);
+    }
+
+    let response;
+
     if (isUrl) {
-      // 📡 ESCANEO VÍA URL (Cloudinary)
+      // 📡 ESCANEO VÍA URL (Cloudinary - Imagen o Fotograma de Video)
       response = await axios.get(endpoint, {
         params: {
           models: activeModels,
           api_user: process.env.SIGHTENGINE_USER,
           api_secret: process.env.SIGHTENGINE_SECRET,
-          url: filePath 
+          url: targetUrl 
         }
       });
     } else {
-      // 📂 ESCANEO LOCAL (Por si acaso alguna vez no se sube a Cloudinary)
+      // 📂 ESCANEO LOCAL
+      if (isVideo) {
+        // Sightengine gratuito no acepta videos locales. Saltamos para no romper la app.
+        console.log("⚠️ Archivo de video local detectado. Se salta el escaneo en el plan gratuito.");
+        return { isSafe: true, reason: null };
+      }
+
       const data = new FormData();
       data.append('models', activeModels); 
       data.append('api_user', process.env.SIGHTENGINE_USER);
@@ -63,19 +76,17 @@ const scanContentStrict = async (filePath, mimetype) => {
       });
     }
 
-    let frames = isVideo && response.data.data && response.data.data.frames ? response.data.data.frames : [response.data];
+    // Como siempre enviamos al endpoint de imágenes, la respuesta es directa (no hay array de 'frames')
+    const result = response.data;
     const threshold = 0.8; // 80% de certeza
 
-    for (const frame of frames) {
-      // Sightengine usa la propiedad 'wad.weapon' para armas
-      const weaponScore = frame.wad?.weapon || 0; 
-      const goreScore = frame.gore?.prob || frame.gore || 0;
-      const aiScore = frame.type?.ai_generated || 0;
+    const weaponScore = result.wad?.weapon || 0; 
+    const goreScore = result.gore?.prob || result.gore || 0;
+    const aiScore = result.type?.ai_generated || 0;
 
-      if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
-      if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
-      if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
-    }
+    if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
+    if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
+    if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
 
     return { isSafe: true, reason: null };
   } catch (error) {
