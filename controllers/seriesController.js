@@ -6,7 +6,7 @@ const fs = require('fs');
 const FormData = require('form-data');
 const axios = require('axios');
 
-// 🔥 NUEVO RADAR ESTRICTO (IA, Armas, Gore, Menores) - Permite NSFW
+// 🔥 NUEVO RADAR ESTRICTO (Hack para Plan Gratuito usando Cloudinary)
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
     console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
@@ -14,42 +14,64 @@ const scanContentStrict = async (filePath, mimetype) => {
   }
 
   try {
-    const data = new FormData();
-    data.append('models', 'gore,weapon,minors,genai'); 
-    data.append('api_user', process.env.SIGHTENGINE_USER);
-    data.append('api_secret', process.env.SIGHTENGINE_SECRET);
-    data.append('media', fs.createReadStream(filePath));
-
     const isVideo = mimetype && mimetype.startsWith('video/');
-    const endpoint = isVideo 
-      ? 'https://api.sightengine.com/1.0/video/sync.json' 
-      : 'https://api.sightengine.com/1.0/check.json';
+    const isUrl = filePath.startsWith('http');
+    
+    // SIEMPRE usaremos el endpoint de imágenes (check.json) porque es el gratuito.
+    const endpoint = 'https://api.sightengine.com/1.0/check.json';
+    const activeModels = 'gore,wad,genai'; 
 
-    const response = await axios({
-      method: 'post',
-      url: endpoint,
-      data: data,
-      headers: data.getHeaders()
-    });
+    let targetUrl = filePath;
 
-    let frames = isVideo && response.data.data && response.data.data.frames ? response.data.data.frames : [response.data];
-    const threshold = 0.8;
+    // 🔥 EL TRUCO DE MAGIA: Si es un video de Cloudinary, le cambiamos la extensión a .jpg
+    if (isVideo && isUrl) {
+      targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg');
+      console.log(`📸 Extrayendo fotograma VIP para escaneo gratuito: ${targetUrl}`);
+    }
 
-    for (const frame of frames) {
-      const weaponScore = frame.weapon?.classes?.weapon || frame.weapon || 0;
-      const goreScore = frame.gore?.prob || frame.gore || 0;
-      const aiScore = frame.type?.ai_generated || 0;
-      let hasMinors = false;
-      
-      if (frame.faces) {
-        hasMinors = frame.faces.some(f => (f.attributes?.minor > threshold || f.features?.minor > threshold));
+    let response;
+
+    if (isUrl) {
+      // 📡 ESCANEO VÍA URL (Cloudinary)
+      response = await axios.get(endpoint, {
+        params: {
+          models: activeModels,
+          api_user: process.env.SIGHTENGINE_USER,
+          api_secret: process.env.SIGHTENGINE_SECRET,
+          url: targetUrl 
+        }
+      });
+    } else {
+      // 📂 ESCANEO LOCAL (Funciona para la portada del curso que es imagen)
+      if (isVideo) {
+        console.log("⚠️ Archivo de video local detectado. Se salta el escaneo en el plan gratuito.");
+        return { isSafe: true, reason: null };
       }
 
-      if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
-      if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
-      if (hasMinors) return { isSafe: false, reason: "Presencia de menores no permitida" };
-      if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
+      const data = new FormData();
+      data.append('models', activeModels); 
+      data.append('api_user', process.env.SIGHTENGINE_USER);
+      data.append('api_secret', process.env.SIGHTENGINE_SECRET);
+      data.append('media', fs.createReadStream(filePath));
+
+      response = await axios({
+        method: 'post',
+        url: endpoint,
+        data: data,
+        headers: data.getHeaders()
+      });
     }
+
+    const result = response.data;
+    const threshold = 0.8;
+
+    const weaponScore = result.wad?.weapon || 0; 
+    const goreScore = result.gore?.prob || result.gore || 0;
+    const aiScore = result.type?.ai_generated || 0;
+
+    if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
+    if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
+    if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
 
     return { isSafe: true, reason: null };
   } catch (error) {
@@ -71,7 +93,7 @@ exports.createSeries = async (req, res) => {
       return res.status(400).json({ error: 'Falta el título o el precio de la serie.' });
     }
 
-    // 🛡️ ESCANEO DE LA PORTADA
+    // 🛡️ ESCANEO DE LA PORTADA (Como es imagen, el escaneo local funciona perfecto)
     if (req.file) {
       const scanResult = await scanContentStrict(req.file.path, req.file.mimetype);
       if (!scanResult.isSafe) {
@@ -124,18 +146,21 @@ exports.addEpisode = async (req, res) => {
       return res.status(400).json({ error: 'Debes adjuntar un video para el episodio.' });
     }
 
-    // 🛡️ ESCANEO DEL VIDEO (Evita IAs y contenido ilegal en los cursos VIP)
-    console.log(`🔍 Escaneando episodio VIP: ${req.file.path}`);
-    const scanResult = await scanContentStrict(req.file.path, req.file.mimetype);
-    if (!scanResult.isSafe) {
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(403).json({ error: `Episodio bloqueado: ${scanResult.reason}. 🚫` });
-    }
-
-    // Subir video a Cloudinary
+    // 1. Subir video a Cloudinary PRIMERO para poder usar el Hack del .jpg
     const result = await cloudinary.uploader.upload(req.file.path, { folder: "fansmio_episodes", resource_type: "video" });
     if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
+    // 2. 🛡️ ESCANEO DEL VIDEO (Evita IAs y contenido ilegal en los cursos VIP)
+    console.log(`🔍 Escaneando episodio VIP: ${result.secure_url}`);
+    const scanResult = await scanContentStrict(result.secure_url, req.file.mimetype);
+    
+    if (!scanResult.isSafe) {
+      // Si es ilegal/IA, lo borramos de Cloudinary inmediatamente
+      await cloudinary.uploader.destroy(result.public_id, { resource_type: 'video' }).catch(()=>console.log("No se pudo borrar de Cloudinary"));
+      return res.status(403).json({ error: `Episodio bloqueado: ${scanResult.reason}. 🚫` });
+    }
+
+    // 3. Si todo está limpio, lo guardamos en la base de datos
     const newEpisode = await prisma.seriesEpisode.create({
       data: {
         title,
