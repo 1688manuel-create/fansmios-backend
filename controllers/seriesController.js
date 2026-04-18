@@ -3,6 +3,61 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { cloudinary } = require('../utils/cloudinaryConfig');
 const fs = require('fs');
+const FormData = require('form-data');
+const axios = require('axios');
+
+// 🔥 NUEVO RADAR ESTRICTO (IA, Armas, Gore, Menores) - Permite NSFW
+const scanContentStrict = async (filePath, mimetype) => {
+  if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
+    console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
+    return { isSafe: true, reason: null };
+  }
+
+  try {
+    const data = new FormData();
+    data.append('models', 'gore,weapon,minors,genai'); 
+    data.append('api_user', process.env.SIGHTENGINE_USER);
+    data.append('api_secret', process.env.SIGHTENGINE_SECRET);
+    data.append('media', fs.createReadStream(filePath));
+
+    const isVideo = mimetype && mimetype.startsWith('video/');
+    const endpoint = isVideo 
+      ? 'https://api.sightengine.com/1.0/video/sync.json' 
+      : 'https://api.sightengine.com/1.0/check.json';
+
+    const response = await axios({
+      method: 'post',
+      url: endpoint,
+      data: data,
+      headers: data.getHeaders()
+    });
+
+    let frames = isVideo && response.data.data && response.data.data.frames ? response.data.data.frames : [response.data];
+    const threshold = 0.8;
+
+    for (const frame of frames) {
+      const weaponScore = frame.weapon?.classes?.weapon || frame.weapon || 0;
+      const goreScore = frame.gore?.prob || frame.gore || 0;
+      const aiScore = frame.type?.ai_generated || 0;
+      let hasMinors = false;
+      
+      if (frame.faces) {
+        hasMinors = frame.faces.some(f => (f.attributes?.minor > threshold || f.features?.minor > threshold));
+      }
+
+      if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
+      if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
+      if (hasMinors) return { isSafe: false, reason: "Presencia de menores no permitida" };
+      if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
+    }
+
+    return { isSafe: true, reason: null };
+  } catch (error) {
+    console.error("⚠️ Error conectando con Sightengine:", error.response?.data || error.message);
+    return { isSafe: true, reason: null }; 
+  }
+};
+
 
 // ==========================================
 // 1. CREAR UNA NUEVA SERIE (CURSO)
@@ -14,6 +69,15 @@ exports.createSeries = async (req, res) => {
 
     if (!title || price === undefined) {
       return res.status(400).json({ error: 'Falta el título o el precio de la serie.' });
+    }
+
+    // 🛡️ ESCANEO DE LA PORTADA
+    if (req.file) {
+      const scanResult = await scanContentStrict(req.file.path, req.file.mimetype);
+      if (!scanResult.isSafe) {
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(403).json({ error: `Portada bloqueada: ${scanResult.reason}. 🚫` });
+      }
     }
 
     let thumbnailUrl = null;
@@ -35,6 +99,7 @@ exports.createSeries = async (req, res) => {
 
     res.status(201).json({ message: 'Serie creada con éxito 🎬', series: newSeries });
   } catch (error) {
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     console.error("Error al crear serie:", error);
     res.status(500).json({ error: 'Error interno al crear el curso.' });
   }
@@ -49,14 +114,22 @@ exports.addEpisode = async (req, res) => {
     const { title, description, order } = req.body;
     const creatorId = req.user.userId;
 
-    // Verificar que la serie le pertenece al creador
     const series = await prisma.series.findUnique({ where: { id: seriesId } });
     if (!series || series.creatorId !== creatorId) {
+      if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(403).json({ error: 'No tienes permiso para modificar esta serie.' });
     }
 
     if (!req.file) {
       return res.status(400).json({ error: 'Debes adjuntar un video para el episodio.' });
+    }
+
+    // 🛡️ ESCANEO DEL VIDEO (Evita IAs y contenido ilegal en los cursos VIP)
+    console.log(`🔍 Escaneando episodio VIP: ${req.file.path}`);
+    const scanResult = await scanContentStrict(req.file.path, req.file.mimetype);
+    if (!scanResult.isSafe) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ error: `Episodio bloqueado: ${scanResult.reason}. 🚫` });
     }
 
     // Subir video a Cloudinary
@@ -75,6 +148,7 @@ exports.addEpisode = async (req, res) => {
 
     res.status(201).json({ message: 'Episodio agregado con éxito 🚀', episode: newEpisode });
   } catch (error) {
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     console.error("Error al subir episodio:", error);
     res.status(500).json({ error: 'Error interno al subir el video.' });
   }
@@ -86,12 +160,11 @@ exports.addEpisode = async (req, res) => {
 exports.getCreatorSeries = async (req, res) => {
   try {
     const { username } = req.params;
-    const viewerId = req.user?.userId; // Puede ser undefined si no ha iniciado sesión
+    const viewerId = req.user?.userId;
 
     const creator = await prisma.user.findUnique({ where: { username } });
     if (!creator) return res.status(404).json({ error: 'Creador no encontrado.' });
 
-    // Traer todas las series del creador con sus episodios
     const series = await prisma.series.findMany({
       where: { creatorId: creator.id },
       include: {
@@ -101,7 +174,6 @@ exports.getCreatorSeries = async (req, res) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    // Formatear la respuesta para ocultar los videos si no han pagado
     const secureSeries = series.map(s => {
       const isOwner = creator.id === viewerId;
       const hasPurchased = viewerId && s.purchases && s.purchases.length > 0;
@@ -114,7 +186,6 @@ exports.getCreatorSeries = async (req, res) => {
         price: s.price,
         thumbnail: s.thumbnail,
         isUnlocked: isUnlocked,
-        // Si no ha pagado, enviamos los títulos pero OCULTAMOS las URLs de los videos
         episodes: s.episodes.map(ep => ({
           id: ep.id,
           title: ep.title,
@@ -141,35 +212,28 @@ exports.buySeries = async (req, res) => {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Validar Serie
       const series = await tx.series.findUnique({ where: { id: seriesId } });
       if (!series) throw new Error('Serie no encontrada.');
 
-      // 2. Verificar compra previa
       const existingPurchase = await tx.seriesPurchase.findUnique({
         where: { seriesId_fanId: { seriesId, fanId } }
       });
       if (existingPurchase) throw new Error('Ya tienes acceso a este curso.');
 
-      // 3. Cargar Billetera
       const fanWallet = await tx.wallet.findUnique({ where: { userId: fanId } });
-
       if (!fanWallet || fanWallet.balance < series.price) {
         throw new Error('Saldo insuficiente en Covra Pay.');
       }
 
-      // 4. CÁLCULOS FINANCIEROS
       const price = parseFloat(series.price);
-      const platformFee = parseFloat((price * 0.10).toFixed(2)); // 10% comisión
+      const platformFee = parseFloat((price * 0.10).toFixed(2));
       const creatorEarnings = parseFloat((price - platformFee).toFixed(2));
 
-      // A) DESCUENTO AL FAN
       await tx.wallet.update({
         where: { userId: fanId },
         data: { balance: { decrement: price } }
       });
 
-      // B) PAGO AL CREADOR (Aseguramos que la billetera exista y sumamos)
       await tx.wallet.upsert({
         where: { userId: series.creatorId },
         update: { pendingBalance: { increment: creatorEarnings } },
@@ -179,102 +243,51 @@ exports.buySeries = async (req, res) => {
           pendingBalance: creatorEarnings 
         }
       });
-      console.log(`💰 Dinero inyectado al Creador ID: ${series.creatorId} | Monto: ${creatorEarnings}`);
 
-      // C) REGISTRO DE ACCESO
       const purchase = await tx.seriesPurchase.create({
         data: { seriesId, fanId, pricePaid: price }
       });
 
-      // D) GENERAR RECIBOS (Confirmamos senderId y receiverId)
       await tx.transaction.create({
-        data: {
-          senderId: fanId,
-          receiverId: series.creatorId,
-          amount: -price,
-          type: 'BUNDLE',
-          status: 'COMPLETED',
-          attachedMessage: `Compra: ${series.title}`,
-          platformFee: 0,
-          netAmount: -price
-        }
+        data: { senderId: fanId, receiverId: series.creatorId, amount: -price, type: 'BUNDLE', status: 'COMPLETED', attachedMessage: `Compra: ${series.title}`, platformFee: 0, netAmount: -price }
       });
 
       await tx.transaction.create({
-        data: {
-          senderId: fanId,
-          receiverId: series.creatorId,
-          amount: price,
-          type: 'BUNDLE',
-          status: 'COMPLETED', // 👈 Ponlo como COMPLETED para que aparezca de inmediato
-          attachedMessage: `Venta: ${series.title}`,
-          platformFee: platformFee,
-          netAmount: creatorEarnings
-        }
+        data: { senderId: fanId, receiverId: series.creatorId, amount: price, type: 'BUNDLE', status: 'COMPLETED', attachedMessage: `Venta: ${series.title}`, platformFee: platformFee, netAmount: creatorEarnings }
       });
 
-      // Recibo para el Creador (Ingreso)
       await tx.transaction.create({
-        data: {
-          senderId: fanId,
-          receiverId: series.creatorId,
-          amount: price,
-          type: 'BUNDLE', // Usamos BUNDLE porque está en tu enum
-          status: 'PENDING',
-          attachedMessage: `Venta de academia VIP: ${series.title}`,
-          platformFee: platformFee,
-          netAmount: creatorEarnings
-        }
+        data: { senderId: fanId, receiverId: series.creatorId, amount: price, type: 'BUNDLE', status: 'PENDING', attachedMessage: `Venta de academia VIP: ${series.title}`, platformFee: platformFee, netAmount: creatorEarnings }
       });
 
-      // E) NOTIFICACIÓN AL CREADOR
       await tx.notification.create({
-        data: {
-          userId: series.creatorId,
-          type: 'SALE',
-          content: `¡Felicidades! Alguien compró tu curso "${series.title}". Ganaste $${creatorEarnings} USD.`
-        }
+        data: { userId: series.creatorId, type: 'SALE', content: `¡Felicidades! Alguien compró tu curso "${series.title}". Ganaste $${creatorEarnings} USD.` }
       });
 
       return purchase;
     });
 
     res.status(200).json({ message: '¡Compra exitosa! 🔓', purchase: result });
-
   } catch (error) {
-    console.error("🚨 ERROR FINANCIERO:", error.message);
     res.status(400).json({ error: error.message || 'Error al procesar el pago.' });
   }
 };
 
 // ==========================================
-// 5. ELIMINAR UNA SERIE (CURSO) - NUEVO 🔥
+// 5. ELIMINAR UNA SERIE (CURSO)
 // ==========================================
 exports.deleteSeries = async (req, res) => {
   try {
     const { seriesId } = req.params;
-    const userId = req.user.userId; // Asegúrate de que el middleware asigna req.user.userId
+    const userId = req.user.userId;
 
-    // Verificar que la serie le pertenece al creador
     const series = await prisma.series.findUnique({ where: { id: seriesId } });
-    
-    if (!series) {
-      return res.status(404).json({ error: 'Serie no encontrada.' });
-    }
+    if (!series) return res.status(404).json({ error: 'Serie no encontrada.' });
+    if (series.creatorId !== userId) return res.status(403).json({ error: 'No tienes permiso para eliminar esta serie.' });
 
-    if (series.creatorId !== userId) {
-      return res.status(403).json({ error: 'No tienes permiso para eliminar esta serie.' });
-    }
-
-    // Eliminar la serie (Si en Prisma tienes onDelete: Cascade, borrará los episodios automáticamente)
-    await prisma.series.delete({
-      where: { id: seriesId }
-    });
-
+    await prisma.series.delete({ where: { id: seriesId } });
     res.status(200).json({ success: true, message: 'Serie eliminada exitosamente' });
-
   } catch (error) {
-    console.error("Error al eliminar la serie:", error);
     res.status(500).json({ error: 'Error interno al eliminar la serie.' });
   }
 };

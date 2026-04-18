@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { cloudinary } = require('../utils/cloudinaryConfig');
 
+// === Filtro de palabras prohibidas ===
 let containsForbiddenWords = () => false;
 try {
   const filter = require('../utils/contentFilter');
@@ -17,30 +18,56 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado, saltando validación...");
 }
 
-const checkAI = async (filePath) => {
+// 🔥 NUEVO RADAR ESTRICTO (IA, Armas, Gore, Menores) - Permite NSFW
+const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
-    return { isAI: false, score: 0 };
+    console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
+    return { isSafe: true, reason: null };
   }
+
   try {
     const data = new FormData();
-    data.append('media', fs.createReadStream(filePath));
-    data.append('models', 'genai');
+    data.append('models', 'gore,weapon,minors,genai'); // 👈 Sin nudity
     data.append('api_user', process.env.SIGHTENGINE_USER);
     data.append('api_secret', process.env.SIGHTENGINE_SECRET);
+    data.append('media', fs.createReadStream(filePath));
+
+    const isVideo = mimetype && mimetype.startsWith('video/');
+    const endpoint = isVideo 
+      ? 'https://api.sightengine.com/1.0/video/sync.json' 
+      : 'https://api.sightengine.com/1.0/check.json';
 
     const response = await axios({
       method: 'post',
-      url: 'https://api.sightengine.com/1.0/check.json',
+      url: endpoint,
       data: data,
       headers: data.getHeaders()
     });
 
-    if (response.data?.type?.ai_generated > 0.5) {
-      return { isAI: true, score: response.data.type.ai_generated };
+    // Sightengine devuelve datos de forma distinta si es video (frames) o imagen
+    let frames = isVideo && response.data.data && response.data.data.frames ? response.data.data.frames : [response.data];
+    const threshold = 0.8; // 80% de certeza
+
+    for (const frame of frames) {
+      const weaponScore = frame.weapon?.classes?.weapon || frame.weapon || 0;
+      const goreScore = frame.gore?.prob || frame.gore || 0;
+      const aiScore = frame.type?.ai_generated || 0;
+      let hasMinors = false;
+      
+      if (frame.faces) {
+        hasMinors = frame.faces.some(f => (f.attributes?.minor > threshold || f.features?.minor > threshold));
+      }
+
+      if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
+      if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
+      if (hasMinors) return { isSafe: false, reason: "Presencia de menores no permitida" };
+      if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
     }
-    return { isAI: false, score: response.data?.type?.ai_generated || 0 };
+
+    return { isSafe: true, reason: null };
   } catch (error) {
-    return { isAI: false, score: 0 }; 
+    console.error("⚠️ Error conectando con Sightengine:", error.response?.data || error.message);
+    return { isSafe: true, reason: null }; // Ante la duda o caída del servidor, no bloqueamos al creador
   }
 };
 
@@ -57,34 +84,21 @@ exports.createPost = async (req, res) => {
     }
 
     if (content && containsForbiddenWords(content)) {
-      if (req.file && req.file.filename) {
-        await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("No se pudo borrar de nube"));
+      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
       }
       return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
     }
 
-    if (req.file && req.file.mimetype.startsWith('image/')) {
-      if (process.env.SIGHTENGINE_USER && process.env.SIGHTENGINE_SECRET) {
-        try {
-          console.log(`🔍 Enviando al radar anti-IA: ${mediaUrl}`);
-          const response = await axios.get('https://api.sightengine.com/1.0/check.json', {
-            params: { url: mediaUrl, models: 'genai', api_user: process.env.SIGHTENGINE_USER, api_secret: process.env.SIGHTENGINE_SECRET }
-          });
-          
-          console.log("📊 Puntaje Sightengine:", response.data.type);
-
-          if (response.data?.type?.ai_generated > 0.5) {
-            const probability = (response.data.type.ai_generated * 100).toFixed(2);
-            if (req.file && req.file.filename) {
-              await cloudinary.uploader.destroy(req.file.filename).catch(() => console.log("No se pudo borrar de nube"));
-            }
-            return res.status(403).json({ error: `Imagen IA Detectada (${probability}%). Fansmio solo permite contenido real. 🤖🚫` });
-          }
-        } catch (apiError) { 
-          console.error("⚠️ Error conectando con Sightengine:", apiError.response?.data || apiError.message); 
-        }
-      } else {
-        console.log("⚠️ RADAR APAGADO: Faltan variables SIGHTENGINE_USER o SIGHTENGINE_SECRET en Coolify.");
+    // 🛡️ ESCANEO MILITAR ANTES DE PUBLICAR
+    if (req.file && req.file.path) {
+      console.log(`🔍 Escaneando contenido: ${mediaUrl}`);
+      const scanResult = await scanContentStrict(req.file.path, req.file.mimetype);
+      
+      if (!scanResult.isSafe) {
+        // Destruir archivo local de inmediato
+        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        return res.status(403).json({ error: `Publicación bloqueada: ${scanResult.reason}. 🚫` });
       }
     }
 
@@ -92,9 +106,10 @@ exports.createPost = async (req, res) => {
       data: { content: content || null, mediaUrl, mediaType, isPPV: isPPV === 'true' || isPPV === true, price: price ? parseFloat(price) : 0, userId },
       include: { user: { select: { email: true, username: true } } }
     });
+    
     res.status(201).json({ message: 'Post publicado con éxito', post: newPost });
   } catch (error) { 
-    if (req.file && req.file.filename) await cloudinary.uploader.destroy(req.file.filename).catch(() => {});
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     res.status(500).json({ error: 'Error interno del servidor al publicar.' }); 
   }
 };
@@ -111,8 +126,8 @@ exports.scanExistingPostsForAI = async (req, res) => {
       const filePath = path.join(__dirname, '..', 'uploads', fileName);
       if (fs.existsSync(filePath)) {
         scannedCount++;
-        const aiResult = await checkAI(filePath);
-        if (aiResult.isAI) {
+        const aiResult = await scanContentStrict(filePath, 'image/jpeg');
+        if (!aiResult.isSafe) {
           fs.unlinkSync(filePath);
           await prisma.post.delete({ where: { id: post.id } });
           deletedCount++;
@@ -120,7 +135,7 @@ exports.scanExistingPostsForAI = async (req, res) => {
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
-    if (res && res.status) res.status(200).json({ message: 'Patrullaje Anti-IA finalizado.', stats: { scanned: scannedCount, deletedBots: deletedCount } });
+    if (res && res.status) res.status(200).json({ message: 'Patrullaje finalizado.', stats: { scanned: scannedCount, deletedBots: deletedCount } });
   } catch (error) { if (res && res.status) res.status(500).json({ error: 'Error.' }); }
 };
 
@@ -172,7 +187,7 @@ exports.getAllPosts = async (req, res) => {
         myReaction: myReactionObj ? myReactionObj.emoji : null, 
         reactionCounts,
         content: hasAccess ? post.content : null, 
-        mediaUrl: post.mediaUrl, // 🔥 MODIFICACIÓN APLICADA: Siempre se envía mediaUrl
+        mediaUrl: post.mediaUrl, 
         isPromoted: !!activePromo, promoTier: activePromo, weight
       };
 
@@ -213,7 +228,6 @@ exports.getCreatorPosts = async (req, res) => {
         else reactionCounts[l.emoji] = 1;
       });
       
-      // 🔥 MODIFICACIÓN APLICADA: Solo bloqueamos el contenido de texto si no tiene acceso
       return { 
         ...post, 
         hasAccess, 
@@ -291,9 +305,6 @@ exports.addComment = async (req, res) => {
 
     let notifiedUserId = null;
 
-    // ==========================================
-    // 📡 RADAR 1: NOTIFICAR AL DUEÑO DEL COMENTARIO PADRE (Nietos/Bisnietos)
-    // ==========================================
     if (parentId) {
       const parentComment = await prisma.comment.findUnique({ where: { id: parentId } });
       if (parentComment && parentComment.userId !== userId) {
@@ -305,15 +316,10 @@ exports.addComment = async (req, res) => {
             link: `/feed#post-${post.id}-comment-${comment.id}` 
           }
         });
-        notifiedUserId = parentComment.userId; // Registramos a quién le acabamos de avisar
+        notifiedUserId = parentComment.userId;
       }
     } 
 
-    // ==========================================
-    // 📡 RADAR 2: NOTIFICAR AL CREADOR DE LA PUBLICACIÓN
-    // ==========================================
-    // Avisamos al dueño de la publicación siempre y cuando no sea él mismo el que comenta, 
-    // y tampoco le hayamos avisado ya en el Radar 1.
     if (post.userId !== userId && post.userId !== notifiedUserId) {
       await prisma.notification.create({
         data: {
