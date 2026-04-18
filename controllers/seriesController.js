@@ -246,3 +246,35 @@ exports.buySeries = async (req, res) => {
     res.status(400).json({ error: error.message || 'Error al procesar el pago.' });
   }
 };
+
+// ==========================================
+// 5. ELIMINAR UNA SERIE (CURSO) - NUEVO 🔥
+// ==========================================
+exports.deleteSeries = async (req, res) => {
+  try {
+    const { seriesId } = req.params;
+    const userId = req.user.userId; // Asegúrate de que el middleware asigna req.user.userId
+
+    // Verificar que la serie le pertenece al creador
+    const series = await prisma.series.findUnique({ where: { id: seriesId } });
+    
+    if (!series) {
+      return res.status(404).json({ error: 'Serie no encontrada.' });
+    }
+
+    if (series.creatorId !== userId) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar esta serie.' });
+    }
+
+    // Eliminar la serie (Si en Prisma tienes onDelete: Cascade, borrará los episodios automáticamente)
+    await prisma.series.delete({
+      where: { id: seriesId }
+    });
+
+    res.status(200).json({ success: true, message: 'Serie eliminada exitosamente' });
+
+  } catch (error) {
+    console.error("Error al eliminar la serie:", error);
+    res.status(500).json({ error: 'Error interno al eliminar la serie.' });
+  }
+};

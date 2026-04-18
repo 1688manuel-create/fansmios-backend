@@ -14,6 +14,9 @@ router.get('/creator/:username', verifyToken, seriesController.getCreatorSeries)
 router.post('/', verifyToken, upload.single('thumbnail'), seriesController.createSeries);
 router.post('/:seriesId/episodes', verifyToken, upload.single('video'), seriesController.addEpisode);
 
+// 🔥 NUEVA RUTA TÁCTICA: Eliminar Serie
+router.delete('/:seriesId', verifyToken, seriesController.deleteSeries);
+
 // Ruta de Compra (Covra Pay)
 router.post('/:seriesId/buy', verifyToken, seriesController.buySeries);
 
