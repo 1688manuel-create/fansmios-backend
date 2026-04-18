@@ -18,7 +18,7 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado, saltando validación...");
 }
 
-// 🔥 NUEVO RADAR ESTRICTO (IA, Armas, Gore, Menores) - Permite NSFW
+// 🔥 NUEVO RADAR ESTRICTO (Soporta URLs de Cloudinary y Archivos Locales)
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
     console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
@@ -26,25 +26,40 @@ const scanContentStrict = async (filePath, mimetype) => {
   }
 
   try {
-    const data = new FormData();
-    data.append('models', 'gore,weapon,minors,genai'); // 👈 Sin nudity
-    data.append('api_user', process.env.SIGHTENGINE_USER);
-    data.append('api_secret', process.env.SIGHTENGINE_SECRET);
-    data.append('media', fs.createReadStream(filePath));
-
     const isVideo = mimetype && mimetype.startsWith('video/');
     const endpoint = isVideo 
       ? 'https://api.sightengine.com/1.0/video/sync.json' 
       : 'https://api.sightengine.com/1.0/check.json';
 
-    const response = await axios({
-      method: 'post',
-      url: endpoint,
-      data: data,
-      headers: data.getHeaders()
-    });
+    let response;
+    const isUrl = filePath.startsWith('http');
 
-    // Sightengine devuelve datos de forma distinta si es video (frames) o imagen
+    if (isUrl) {
+      // 📡 ESCANEO VÍA URL (Cloudinary)
+      response = await axios.get(endpoint, {
+        params: {
+          models: 'gore,weapon,minors,genai',
+          api_user: process.env.SIGHTENGINE_USER,
+          api_secret: process.env.SIGHTENGINE_SECRET,
+          [isVideo ? 'stream_url' : 'url']: filePath // Sightengine usa stream_url para videos
+        }
+      });
+    } else {
+      // 📂 ESCANEO LOCAL (Disco duro)
+      const data = new FormData();
+      data.append('models', 'gore,weapon,minors,genai'); 
+      data.append('api_user', process.env.SIGHTENGINE_USER);
+      data.append('api_secret', process.env.SIGHTENGINE_SECRET);
+      data.append('media', fs.createReadStream(filePath));
+
+      response = await axios({
+        method: 'post',
+        url: endpoint,
+        data: data,
+        headers: data.getHeaders()
+      });
+    }
+
     let frames = isVideo && response.data.data && response.data.data.frames ? response.data.data.frames : [response.data];
     const threshold = 0.8; // 80% de certeza
 
@@ -67,7 +82,7 @@ const scanContentStrict = async (filePath, mimetype) => {
     return { isSafe: true, reason: null };
   } catch (error) {
     console.error("⚠️ Error conectando con Sightengine:", error.response?.data || error.message);
-    return { isSafe: true, reason: null }; // Ante la duda o caída del servidor, no bloqueamos al creador
+    return { isSafe: true, reason: null }; 
   }
 };
 
@@ -84,8 +99,12 @@ exports.createPost = async (req, res) => {
     }
 
     if (content && containsForbiddenWords(content)) {
-      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-        fs.unlinkSync(req.file.path);
+      if (req.file && req.file.path) {
+        if (req.file.path.startsWith('http')) {
+           const parts = req.file.path.split('/');
+           const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
+           await cloudinary.uploader.destroy(publicId).catch(()=>{});
+        } else if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       }
       return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
     }
@@ -96,8 +115,17 @@ exports.createPost = async (req, res) => {
       const scanResult = await scanContentStrict(req.file.path, req.file.mimetype);
       
       if (!scanResult.isSafe) {
-        // Destruir archivo local de inmediato
-        if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        // 🔥 SI ES IA, DESTRUIR ARCHIVO DE LA NUBE O LOCAL
+        if (req.file.path.startsWith('http')) {
+           // Extraer el Public ID de Cloudinary desde la URL para borrarlo
+           const parts = req.file.path.split('/');
+           const filenameWithExt = parts[parts.length - 1];
+           // Asegúrate de que tu carpeta se llama 'fansmio_uploads' en Cloudinary
+           const publicId = 'fansmio_uploads/' + filenameWithExt.split('.'); 
+           await cloudinary.uploader.destroy(publicId, { resource_type: mediaType.toLowerCase() }).catch(()=>console.log("No se pudo borrar de Cloudinary"));
+        } else if (fs.existsSync(req.file.path)) {
+           fs.unlinkSync(req.file.path);
+        }
         return res.status(403).json({ error: `Publicación bloqueada: ${scanResult.reason}. 🚫` });
       }
     }
@@ -109,7 +137,13 @@ exports.createPost = async (req, res) => {
     
     res.status(201).json({ message: 'Post publicado con éxito', post: newPost });
   } catch (error) { 
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    if (req.file && req.file.path) {
+        if (req.file.path.startsWith('http')) {
+           const parts = req.file.path.split('/');
+           const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
+           await cloudinary.uploader.destroy(publicId).catch(()=>{});
+        } else if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({ error: 'Error interno del servidor al publicar.' }); 
   }
 };
