@@ -18,7 +18,7 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado, saltando validación...");
 }
 
-// 🔥 NUEVO RADAR ESTRICTO (Corrección de ruta para videos)
+// 🔥 NUEVO RADAR ESTRICTO (Modelos Oficiales de Sightengine)
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
     console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
@@ -27,8 +27,6 @@ const scanContentStrict = async (filePath, mimetype) => {
 
   try {
     const isVideo = mimetype && mimetype.startsWith('video/');
-    
-    // 🔥 FIX APLICADO: El endpoint correcto para videos MP4 es check-sync.json
     const endpoint = isVideo 
       ? 'https://api.sightengine.com/1.0/video/check-sync.json' 
       : 'https://api.sightengine.com/1.0/check.json';
@@ -36,20 +34,23 @@ const scanContentStrict = async (filePath, mimetype) => {
     let response;
     const isUrl = filePath.startsWith('http');
 
+    // 🔥 FIX: Modelos correctos ('wad' = Armas, 'gore' = Violencia, 'genai' = Inteligencia Artificial)
+    const activeModels = 'gore,wad,genai'; 
+
     if (isUrl) {
       // 📡 ESCANEO VÍA URL (Cloudinary)
       response = await axios.get(endpoint, {
         params: {
-          models: 'gore,weapon,minors,genai',
+          models: activeModels,
           api_user: process.env.SIGHTENGINE_USER,
           api_secret: process.env.SIGHTENGINE_SECRET,
-          url: filePath // Usamos 'url' para que Sightengine descargue el MP4
+          url: filePath 
         }
       });
     } else {
-      // 📂 ESCANEO LOCAL (Disco duro)
+      // 📂 ESCANEO LOCAL (Por si acaso alguna vez no se sube a Cloudinary)
       const data = new FormData();
-      data.append('models', 'gore,weapon,minors,genai'); 
+      data.append('models', activeModels); 
       data.append('api_user', process.env.SIGHTENGINE_USER);
       data.append('api_secret', process.env.SIGHTENGINE_SECRET);
       data.append('media', fs.createReadStream(filePath));
@@ -66,18 +67,13 @@ const scanContentStrict = async (filePath, mimetype) => {
     const threshold = 0.8; // 80% de certeza
 
     for (const frame of frames) {
-      const weaponScore = frame.weapon?.classes?.weapon || frame.weapon || 0;
+      // Sightengine usa la propiedad 'wad.weapon' para armas
+      const weaponScore = frame.wad?.weapon || 0; 
       const goreScore = frame.gore?.prob || frame.gore || 0;
       const aiScore = frame.type?.ai_generated || 0;
-      let hasMinors = false;
-      
-      if (frame.faces) {
-        hasMinors = frame.faces.some(f => (f.attributes?.minor > threshold || f.features?.minor > threshold));
-      }
 
       if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
       if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
-      if (hasMinors) return { isSafe: false, reason: "Presencia de menores no permitida" };
       if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
     }
 
