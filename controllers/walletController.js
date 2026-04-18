@@ -70,7 +70,7 @@ exports.getTransactionHistory = async (req, res) => {
   }
 };
 
-// 🔥 SOLICITAR UN RETIRO 
+// 🔥 SOLICITAR UN RETIRO (AHORA CON REGISTRO DE COMISIÓN CORRECTO)
 exports.requestWithdrawal = async (req, res) => {
   try {
     const creatorId = req.user.userId;
@@ -127,7 +127,7 @@ exports.requestWithdrawal = async (req, res) => {
       return res.status(400).json({ error: 'Configura tu Billetera USDT (TRC20) antes de solicitar un retiro.' });
     }
 
-    // 👑 CONSULTAR COMISIONES DE RETIRO
+    // 👑 CONSULTAR COMISIONES DE RETIRO DESDE LA BASE DE DATOS
     const settings = await prisma.platformSettings.findFirst() || { feeWithdrawalExp: 5, feeWithdrawalStd: 2 };
     
     const feePercent = isExpress ? (settings.feeWithdrawalExp / 100) : (settings.feeWithdrawalStd / 100);
@@ -136,8 +136,9 @@ exports.requestWithdrawal = async (req, res) => {
     
     const typeLabel = isExpress ? '⚡ RETIRO EXPRÉS' : '🐢 RETIRO ESTÁNDAR';
 
-    // 🔒 FLUJO SEGURO (Mueve de balance a pendingBalance)
+    // 🔒 FLUJO SEGURO FINANCIERO
     const withdrawal = await prisma.$transaction(async (tx) => {
+      // 1. Movemos el dinero a cuarentena (Pendiente)
       await tx.wallet.update({
         where: { userId: creatorId },
         data: { 
@@ -146,6 +147,21 @@ exports.requestWithdrawal = async (req, res) => {
         }
       });
 
+      // 2. 💰 REGISTRO VITAL: Creamos el recibo de la transacción para el Dashboard
+      await tx.transaction.create({
+        data: {
+          senderId: creatorId,
+          receiverId: creatorId,
+          type: 'PAYOUT',
+          status: 'PENDING',
+          amount: -withdrawalAmount, // Sale de la cuenta
+          platformFee: feeAmount,    // 🔥 ¡AQUÍ ATRAPAMOS LA COMISIÓN DEL 5% PARA FANSMIO!
+          netAmount: -netAmount,     // Lo que realmente le va a llegar al creador
+          attachedMessage: `Solicitud de ${typeLabel}`
+        }
+      });
+
+      // 3. Creamos la solicitud de retiro formal para los administradores
       return await tx.withdrawal.create({
         data: { 
           creatorId: creatorId, 
@@ -181,47 +197,33 @@ exports.getWithdrawalHistory = async (req, res) => {
   }
 };
 
-// 🔥 LA CONSULTA MAESTRA DEL DASHBOARD (REESCRITA Y BLINDADA)
+// 🔥 LA CONSULTA MAESTRA DEL DASHBOARD
 exports.getDashboard = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    // 1. Buscamos al usuario
-    const user = await prisma.user.findUnique({
-      where: { id: userId }
-    });
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const wallet = await prisma.wallet.findUnique({ where: { userId: userId } });
 
-    // 2. Buscamos la bóveda real
-    const wallet = await prisma.wallet.findUnique({
-      where: { userId: userId }
-    });
-
-    // 3. 🎯 LA CALCULADORA DEL HISTÓRICO FACTURADO
-    // Suma todo el dinero (neto) que haya ingresado al creador
     const totalEarnedAggr = await prisma.transaction.aggregate({
       where: {
         receiverId: userId,
-        status: { in: ['COMPLETED', 'PENDING'] }, // Dinero seguro o en cuarentena
-        type: { in: ['TIP', 'SUBSCRIPTION', 'PPV_POST', 'PPV_MESSAGE', 'BUNDLE', 'LIVE_TICKET'] } // 👈 ¡Incluimos BUNDLE de la academia!
+        status: { in: ['COMPLETED', 'PENDING'] }, 
+        type: { in: ['TIP', 'SUBSCRIPTION', 'PPV_POST', 'PPV_MESSAGE', 'BUNDLE', 'LIVE_TICKET'] } 
       },
-      _sum: {
-        netAmount: true 
-      }
+      _sum: { netAmount: true }
     });
     const totalEarnedHistorial = totalEarnedAggr._sum.netAmount || 0;
 
-    // 4. 🎯 HISTORIAL DE RETIROS (Para la tabla inferior derecha)
     const withdrawalHistory = await prisma.withdrawal.findMany({
       where: { creatorId: userId },
       orderBy: { createdAt: 'desc' },
       take: 5
     });
 
-    // 5. Lógica Dinámica de Saldo
     const isCreator = user?.role === 'CREATOR' || user?.role === 'ADMIN';
     const displayBalance = isCreator ? (wallet?.balance || 0) : (user?.walletBalance || 0);
 
-    // 6. Visión Total de Transacciones
     const recentTransactions = await prisma.transaction.findMany({
       where: {
         OR: [
@@ -237,7 +239,6 @@ exports.getDashboard = async (req, res) => {
       }
     });
 
-    // 7. Mapeo táctico (Le avisamos al frontend qué es ingreso y qué es gasto)
     const mappedTransactions = recentTransactions.map(tx => ({
       ...tx,
       isIncome: tx.receiverId === userId && tx.type !== 'CREDIT_TOPUP'
@@ -249,8 +250,8 @@ exports.getDashboard = async (req, res) => {
         pendingBalance: wallet?.pendingBalance || 0,
         cryptoAddress: wallet?.cryptoAddress || null
       },
-      totalEarnedHistorial: totalEarnedHistorial, // 👈 ¡EL NÚMERO MÁGICO ENVIADO AL FRONTEND!
-      withdrawalHistory: withdrawalHistory,       // 👈 ¡LOS RETIROS ENVIADOS AL FRONTEND!
+      totalEarnedHistorial: totalEarnedHistorial, 
+      withdrawalHistory: withdrawalHistory,       
       recentTransactions: mappedTransactions
     });
 

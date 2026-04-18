@@ -229,7 +229,7 @@ exports.getCreatorSeries = async (req, res) => {
 };
 
 // ==========================================
-// 4. COMPRAR SERIE (INTEGRACIÓN CON COVRA PAY)
+// 4. COMPRAR SERIE (INTEGRACIÓN CON COVRA PAY Y MODO DIOS)
 // ==========================================
 exports.buySeries = async (req, res) => {
   const fanId = req.user.userId;
@@ -250,8 +250,13 @@ exports.buySeries = async (req, res) => {
         throw new Error('Saldo insuficiente en Covra Pay.');
       }
 
+      // 👑 MODO DIOS: Leer la comisión de la base de datos (Usamos el fee de PPV para los cursos)
+      const settings = await tx.platformSettings.findFirst() || { feePPV: 15 };
+      const feePercent = settings.feePPV / 100;
+
+      // 4. CÁLCULOS FINANCIEROS DINÁMICOS
       const price = parseFloat(series.price);
-      const platformFee = parseFloat((price * 0.10).toFixed(2));
+      const platformFee = parseFloat((price * feePercent).toFixed(2)); // Ahora usa el porcentaje del panel
       const creatorEarnings = parseFloat((price - platformFee).toFixed(2));
 
       await tx.wallet.update({
@@ -277,6 +282,7 @@ exports.buySeries = async (req, res) => {
         data: { senderId: fanId, receiverId: series.creatorId, amount: -price, type: 'BUNDLE', status: 'COMPLETED', attachedMessage: `Compra: ${series.title}`, platformFee: 0, netAmount: -price }
       });
 
+      // 🔥 AQUÍ SE REGISTRA LA COMISIÓN EXACTA DEL MODO DIOS PARA FANSMIO
       await tx.transaction.create({
         data: { senderId: fanId, receiverId: series.creatorId, amount: price, type: 'BUNDLE', status: 'COMPLETED', attachedMessage: `Venta: ${series.title}`, platformFee: platformFee, netAmount: creatorEarnings }
       });
