@@ -33,16 +33,16 @@ exports.buyBoost = async (req, res) => {
         data: { balance: { decrement: price } }
       });
 
-      // B) Registro contable
+      // B) Registro contable (🔥 EL PARCHE FINANCIERO AQUÍ)
       await tx.transaction.create({
         data: {
           senderId: userId,
-          receiverId: userId, // Es un pago a la plataforma
+          receiverId: userId, // Queda en su historial
           type: 'PROMOTION',
           status: 'COMPLETED',
-          amount: price,
-          platformFee: 0,
-          netAmount: price,
+          amount: price, // Lo que pagó
+          platformFee: price, // 🔥 EL 100% ES GANANCIA PURA PARA FANSMIO
+          netAmount: 0, // El creador gana 0 con esto (es un gasto, no un ingreso)
           attachedMessage: `Compra de Fansmio Boost: ${promoType}`
         }
       });
@@ -74,7 +74,7 @@ exports.buyBoost = async (req, res) => {
   }
 };
 
-// 🔥 NUEVA FUNCIÓN: Ver si el creador ya tiene un Boost activo
+// 🔥 FUNCIÓN: Ver si el creador ya tiene un Boost activo
 exports.getStatus = async (req, res) => {
   try {
     const userId = req.user.userId;
