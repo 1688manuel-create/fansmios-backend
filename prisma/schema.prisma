@@ -648,3 +648,13 @@ model SeriesPurchase {
   // Un fan solo puede comprar el mismo curso una vez
   @@unique([seriesId, fanId]) 
 }
+
+model PlatformWithdrawal {
+  id            String   @id @default(uuid())
+  adminId       String
+  admin         User     @relation(fields: [adminId], references: [id])
+  amount        Float
+  cryptoAddress String?  // Tu wallet personal a donde mandaste el dinero
+  notes         String?  // Ej: "Retiro para pagar servidores"
+  createdAt     DateTime @default(now())
+}

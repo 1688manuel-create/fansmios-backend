@@ -257,3 +257,89 @@ exports.getAllWithdrawals = async (req, res) => {
     res.status(500).json({ error: 'Error interno' });
   }
 };
+
+// ==========================================
+// 8. LA BÓVEDA DEL COMANDANTE (Retirar Ganancias de FansMio)
+// ==========================================
+
+exports.getPlatformVaultBalance = async (req, res) => {
+  try {
+    // 1. Sumamos todas las comisiones cobradas (Ingresos Brutos)
+    const totalFeesAggr = await prisma.transaction.aggregate({
+      where: { status: { in: ['COMPLETED', 'PENDING'] } },
+      _sum: { platformFee: true }
+    });
+    const ingresosBrutos = totalFeesAggr._sum.platformFee || 0;
+
+    // 2. Sumamos todo lo que el Admin ya retiró en el pasado
+    const totalWithdrawnAggr = await prisma.platformWithdrawal.aggregate({
+      _sum: { amount: true }
+    });
+    const totalRetirado = totalWithdrawnAggr._sum.amount || 0;
+
+    // 3. Lo que te queda disponible para sacar hoy
+    const saldoDisponible = ingresosBrutos - totalRetirado;
+
+    res.status(200).json({
+      message: 'Estado de la Bóveda Central 🏦',
+      ingresosBrutos,
+      totalRetirado,
+      saldoDisponible
+    });
+  } catch (error) {
+    console.error('Error al leer la bóveda:', error);
+    res.status(500).json({ error: 'Error interno al calcular ganancias.' });
+  }
+};
+
+exports.withdrawPlatformProfit = async (req, res) => {
+  try {
+    const adminId = req.user.userId;
+    const { amount, cryptoAddress, notes } = req.body;
+    
+    const withdrawalAmount = parseFloat(amount);
+
+    if (!withdrawalAmount || withdrawalAmount <= 0) {
+      return res.status(400).json({ error: 'Monto inválido.' });
+    }
+
+    // 1. Verificar si hay fondos suficientes
+    const totalFeesAggr = await prisma.transaction.aggregate({
+      where: { status: { in: ['COMPLETED', 'PENDING'] } },
+      _sum: { platformFee: true }
+    });
+    const ingresosBrutos = totalFeesAggr._sum.platformFee || 0;
+
+    const totalWithdrawnAggr = await prisma.platformWithdrawal.aggregate({
+      _sum: { amount: true }
+    });
+    const totalRetirado = totalWithdrawnAggr._sum.amount || 0;
+
+    const saldoDisponible = ingresosBrutos - totalRetirado;
+
+    if (withdrawalAmount > saldoDisponible) {
+      return res.status(400).json({ 
+        error: `Fondos insuficientes. Solo tienes $${saldoDisponible.toFixed(2)} disponibles para retirar.` 
+      });
+    }
+
+    // 2. Registrar el retiro del Admin
+    const platformWithdrawal = await prisma.platformWithdrawal.create({
+      data: {
+        adminId: adminId,
+        amount: withdrawalAmount,
+        cryptoAddress: cryptoAddress || 'BINANCE_COLD_WALLET',
+        notes: notes || 'Retiro de ganancias de la plataforma.'
+      }
+    });
+
+    res.status(201).json({ 
+      message: `¡Retiro exitoso! Has extraído $${withdrawalAmount} de la bóveda de FansMio. 💸`, 
+      platformWithdrawal 
+    });
+
+  } catch (error) {
+    console.error('Error al retirar ganancias:', error);
+    res.status(500).json({ error: 'Error interno al procesar el retiro de la plataforma.' });
+  }
+};
