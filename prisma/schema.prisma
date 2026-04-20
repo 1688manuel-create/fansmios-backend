@@ -148,6 +148,8 @@ model User {
   discounts            Discount[]        @relation("CreatorDiscounts")
   coupons              Coupon[]          @relation("CreatorCoupons")
 
+  platformWithdrawals PlatformWithdrawal[]
+
   sentMessages     Message[]      @relation("SentMessages")
   receivedMessages Message[]      @relation("ReceivedMessages")
   creatorChats     Conversation[] @relation("CreatorConversations")
