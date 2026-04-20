@@ -55,8 +55,10 @@ router.get('/users', verifyToken, isAdmin, adminController.getAllUsers);
 // ==========================================
 router.get('/analytics/dashboard', verifyToken, isAdmin, adminAnalyticsController.getSuperAdminDashboard);
 
-// Rutas para la bóveda del Admin
-router.get('/vault', verifyToken, checkRole(['ADMIN']), adminController.getPlatformVaultBalance);
-router.post('/vault/withdraw', verifyToken, checkRole(['ADMIN']), adminController.withdrawPlatformProfit);
+// ==========================================
+// 🏦 RUTAS PARA LA BÓVEDA DEL ADMIN
+// ==========================================
+router.get('/vault', verifyToken, isAdmin, adminController.getPlatformVaultBalance);
+router.post('/vault/withdraw', verifyToken, isAdmin, adminController.withdrawPlatformProfit);
 
 module.exports = router;
