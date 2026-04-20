@@ -62,7 +62,7 @@ exports.register = async (req, res) => {
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const tokenExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 horas
 
-    // 5. Crear Usuario (🔥 MODO BYPASS ACTIVADO)
+    // 5. Crear Usuario (🔥 MODO ESTRICTO: Verificación Obligatoria)
     const newUser = await prisma.user.create({
       data: {
         username: safeUsername,
@@ -70,14 +70,14 @@ exports.register = async (req, res) => {
         passwordHash: hashedPassword,
         role: role === 'CREATOR' ? 'CREATOR' : 'FAN',
         referredById: referrerId,
-        emailVerificationToken: null, 
-        emailVerificationExpires: null,
-        isEmailVerified: true // ⚠️ Hace que no necesite verificar el correo para entrar
+        emailVerificationToken: verificationToken, // 👈 Guardamos el token en la BD
+        emailVerificationExpires: tokenExpires,    // 👈 Guardamos la fecha de expiración
+        isEmailVerified: false                     // 👈 ⚠️ FALSO: Ahora el usuario NO entra si no verifica
       }
     });
 
-    // 💌 6. ENVÍO DE CORREO (APAGADO TEMPORALMENTE PARA EVITAR EL CONGELAMIENTO DE 5 MIN)
-    /* const verifyLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
+    // 💌 6. ENVÍO DE CORREO (🔥 TURBINAS ENCENDIDAS)
+    const verifyLink = `${process.env.FRONTEND_URL}/auth/verify-email?token=${verificationToken}`;
     try {
       await sendEmail(
         newUser.email, 
@@ -85,11 +85,11 @@ exports.register = async (req, res) => {
         `¡Hola @${newUser.username}!\n\nEstás a un paso de entrar al imperio. Haz clic aquí (válido por 24h):\n\n${verifyLink}`
       );
     } catch (emailError) {
+      // Si el correo falla (ej. contraseña de Gmail incorrecta), borramos al usuario para que no se quede trabado
       await prisma.user.delete({ where: { id: newUser.id } });
       console.error('🚨 Fallo SMTP, usuario eliminado para reintento:', emailError);
       return res.status(500).json({ error: 'Fallo al enviar el correo de verificación. Inténtalo de nuevo.' });
     }
-    */
 
     // 7. Crear perfil de creador si aplica
     if (newUser.role === 'CREATOR') {
@@ -154,7 +154,7 @@ exports.login = async (req, res) => {
       where: { email },
       include: { 
         creatorProfile: true,
-        wallet: true // 👈 ¡NUEVO! Traemos la bóveda del usuario
+        wallet: true // 👈 Traemos la bóveda del usuario
       } 
     });
     
@@ -207,7 +207,7 @@ exports.login = async (req, res) => {
         name: user.name, 
         role: user.role, 
         username: user.username,
-        walletBalance: user.wallet?.balance || 0, // 👈 ¡NUEVO! Enviamos el saldo real o 0 si no tiene bóveda
+        walletBalance: user.wallet?.balance || 0, // 👈 Enviamos el saldo real o 0 si no tiene bóveda
         creatorProfile: user.creatorProfile 
       }
     });
