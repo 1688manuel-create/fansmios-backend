@@ -3,11 +3,11 @@ const nodemailer = require('nodemailer');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// 🔥 CORRECCIÓN 1: Configuramos el "cartero" de forma explícita y blindada para la nube
+// 🔥 CORRECCIÓN TÁCTICA: Cambiamos al puerto 587 (STARTTLS) que es menos probable que esté bloqueado
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: process.env.EMAIL_PORT || 465,
-  secure: true, // true obliga a usar la conexión encriptada directa (SSL)
+  port: process.env.EMAIL_PORT || 587, 
+  secure: false, // 👈 false es obligatorio cuando usamos el puerto 587
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -29,6 +29,7 @@ const sendEmail = async (to, subject, text) => {
     console.log(`✅ Correo básico enviado exitosamente a: ${to}`);
   } catch (error) {
     console.error('❌ Error enviando correo básico:', error);
+    throw error; // 👈 ¡ESTO ES VITAL! Lanzamos el error para que el AuthController lo atrape y borre la cuenta atascada
   }
 };
 
@@ -37,7 +38,6 @@ const sendEmail = async (to, subject, text) => {
 // =========================================================
 const sendNotificationEmail = async (userId, type, subject, text) => {
   try {
-    // 1. Buscamos al usuario y sus interruptores de correo
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { email: true, emailPromotions: true, emailNewMessages: true, emailSales: true }
@@ -45,15 +45,12 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
 
     if (!user) return;
 
-    // 2. 🛡️ FILTRO DE PRIVACIDAD: Revisamos si el usuario APAGÓ este correo
     if (type === 'sale' && !user.emailSales) return; 
     if (type === 'message' && !user.emailNewMessages) return; 
     if (type === 'promotion' && !user.emailPromotions) return; 
 
-    // 🔥 CORRECCIÓN 2: Usar la variable de entorno en lugar de localhost
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-    // 3. Armamos un diseño HTML elegante (Plantilla Oscura)
     const htmlTemplate = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #050505; color: #ffffff; border-radius: 15px; overflow: hidden; border: 1px solid #333;">
         <div style="background: linear-gradient(90deg, #6b21a8, #2563eb); padding: 20px; text-align: center;">
@@ -72,7 +69,6 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
       </div>
     `;
 
-    // 4. Enviamos el correo bonito
     await transporter.sendMail({
       from: `"FansMio Notificaciones" <${process.env.EMAIL_USER}>`,
       to: user.email,
@@ -84,10 +80,10 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
 
   } catch (error) {
     console.error("❌ Error al enviar correo inteligente:", error);
+    // Aquí no lanzamos error porque las notificaciones no deben interrumpir el sistema
   }
 };
 
-// Exportamos ambas funciones sin romper lo que ya tenías
 module.exports = sendEmail;
 module.exports.sendEmail = sendEmail;
 module.exports.sendNotificationEmail = sendNotificationEmail;
