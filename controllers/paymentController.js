@@ -6,7 +6,7 @@ const { sendNotificationEmail } = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushService');
 
 // ==========================================
-// 🏦 MOTOR COVRA PAY: PROCESADOR INSTANTÁNEO
+// 🏦 MOTOR COVRA PAY: PROCESADOR Y PUENTE PAYRAM
 // ==========================================
 
 exports.createPaymentIntent = async (req, res) => {
@@ -38,7 +38,7 @@ exports.createPaymentIntent = async (req, res) => {
 
     if (finalAmount < 0.50) finalAmount = 0.50;
 
-    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL (Agregamos feeReferral)
+    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL
     const settings = await prisma.platformSettings.findFirst() || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20, feeReferral: 5 };
     
     let feePercent = 0.20; // Default por seguridad
@@ -56,54 +56,90 @@ exports.createPaymentIntent = async (req, res) => {
 
     const platformFee = finalAmount * feePercent; 
     const netAmount = finalAmount - platformFee;
+    
+    // Identificador único para el rastreo en la Blockchain
     const payramReceiptId = `PAYRAM-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 
-    // Obtener nombres para la notificación
-    const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true } });
-    
-    // TRANSACCIÓN ATÓMICA
-    await prisma.$transaction(async (db) => {
+    // Obtener datos del fan
+    const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true, email: true } });
+
+    // ==========================================
+    // 💳 RUTA 1: RECARGA DE BILLETERA (RAMPA EXTERNA PAYRAM)
+    // ==========================================
+    if (type === 'CREDIT_TOPUP') {
       
+      // 1. Guardamos la transacción como PENDIENTE (No se asigna saldo todavía)
+      await prisma.transaction.create({
+        data: { 
+          senderId: fanId, 
+          receiverId: fanId, 
+          type: 'CREDIT_TOPUP', 
+          status: 'PENDING', // ⚠️ En espera del Webhook de PayRam
+          amount: finalAmount, 
+          platformFee, 
+          netAmount, 
+          payramReceiptId 
+        }
+      });
+
+      // 2. ⚡ LLAMADA A LA API DE PAYRAM PARA GENERAR ENLACE (RED BASE)
+      try {
+        const payramResponse = await fetch(`${process.env.PAYRAM_BASE_URL}/api/v1/payment`, {
+          method: 'POST',
+          headers: {
+            'API-Key': process.env.PAYRAM_API_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            amount: finalAmount,
+            currencyCode: 'USDC', // Liquidación en Stablecoin
+            blockchainCode: 'BASE', // Requisito estricto para pagos con Tarjeta
+            customerEmail: fan.email,
+            referenceId: payramReceiptId // ID de seguimiento para nuestro Webhook
+          })
+        });
+
+        const payramData = await payramResponse.json();
+
+        if (!payramResponse.ok) {
+          throw new Error(payramData.message || 'Error al generar link de pago con PayRam');
+        }
+
+        // 3. Devolvemos el checkout de PayRam al Frontend
+        return res.status(200).json({ 
+          success: true, 
+          message: 'Redirigiendo a pasarela segura...', 
+          receipt: payramReceiptId,
+          checkoutUrl: payramData.paymentUrl 
+        });
+
+      } catch (payramError) {
+        console.error("🚨 Error de conexión con PayRam:", payramError);
+        return res.status(500).json({ error: 'El servidor de pagos no responde. Intenta más tarde.' });
+      }
+
+    } else {
       // ==========================================
-      // 💳 RUTA 1: RECARGA DE BILLETERA DEL FAN
+      // 🛍️ RUTA 2: PAGOS INTERNOS A CREADORES (PPV, Tips, Subs)
       // ==========================================
-      if (type === 'CREDIT_TOPUP') {
+      
+      const targetMessageId = messageId || attachedMessage;
+
+      // TRANSACCIÓN ATÓMICA PARA MOVIMIENTOS INTERNOS
+      await prisma.$transaction(async (db) => {
         
-        await db.transaction.create({
-          data: { 
-            senderId: fanId, 
-            receiverId: fanId, // El receptor es él mismo
-            type: 'CREDIT_TOPUP', 
-            status: 'COMPLETED', 
-            amount: finalAmount, 
-            platformFee, 
-            netAmount, 
-            payramReceiptId 
-          }
-        });
-
-        // 🟢 Sube el dinero al BALANCE DISPONIBLE (listo para gastar)
-        await db.wallet.upsert({
+        // 🔴 DESCONTAR EL DINERO DE LA BÓVEDA DEL FAN
+        const fanWallet = await db.wallet.findUnique({ where: { userId: fanId } });
+        if (!fanWallet || fanWallet.balance < finalAmount) {
+          throw new Error("Saldo insuficiente en tu Bóveda de FansMio.");
+        }
+        
+        await db.wallet.update({
           where: { userId: fanId },
-          update: { balance: { increment: finalAmount } },
-          create: { userId: fanId, balance: finalAmount }
+          data: { balance: { decrement: finalAmount } }
         });
 
-        await db.notification.create({
-          data: {
-            userId: fanId,
-            type: 'SYSTEM',
-            content: `Has recargado $${finalAmount} USD a tu billetera con éxito. ⚡`,
-            link: '/dashboard'
-          }
-        });
-
-      } else {
-        // ==========================================
-        // 🛍️ RUTA 2: PAGOS A CREADORES (PPV, Tips, Subs)
-        // ==========================================
-        const targetMessageId = messageId || attachedMessage;
-
+        // Registrar la compra
         await db.transaction.create({
           data: { 
             senderId: fanId, 
@@ -120,28 +156,16 @@ exports.createPaymentIntent = async (req, res) => {
           }
         });
 
-        // 🟡 El dinero va a PENDING BALANCE (cuarentena)
+        // 🟡 El dinero va a PENDING BALANCE (cuarentena del creador)
         await db.wallet.upsert({
           where: { userId: creatorId },
           update: { pendingBalance: { increment: netAmount } },
           create: { userId: creatorId, pendingBalance: netAmount }
         });
 
-        // 🔴 DESCONTAR EL DINERO DE LA BÓVEDA DEL FAN
-        const fanWallet = await db.wallet.findUnique({ where: { userId: fanId } });
-        if (!fanWallet || fanWallet.balance < finalAmount) {
-          throw new Error("Saldo insuficiente en tu Bóveda de FansMio.");
-        }
-        
-        await db.wallet.update({
-          where: { userId: fanId },
-          data: { balance: { decrement: finalAmount } }
-        });
-
         // ==========================================
         // 🤝 MOTOR DE REFERIDOS (SOLO SUSCRIPCIONES - CANDADO 5 MESES)
         // ==========================================
-        // 🔥 Solo se activa si la venta es una SUSCRIPCIÓN
         if (type === 'SUBSCRIPTION') {
           const creatorData = await db.user.findUnique({ 
             where: { id: creatorId }, 
@@ -149,7 +173,6 @@ exports.createPaymentIntent = async (req, res) => {
           });
           
           if (creatorData && creatorData.referredById) {
-            
             // ⏳ REGLA DE ORO: Calcular si han pasado menos de 5 meses
             const expirationDate = new Date(creatorData.createdAt);
             expirationDate.setMonth(expirationDate.getMonth() + 5);
@@ -159,14 +182,14 @@ exports.createPaymentIntent = async (req, res) => {
               const referralPercent = (settings.feeReferral || 5) / 100;
               const referralBonus = finalAmount * referralPercent;
 
-              // Le depositamos la comisión al Padrino
+              // Depositamos la comisión al Padrino
               await db.wallet.upsert({
                 where: { userId: creatorData.referredById },
                 update: { balance: { increment: referralBonus } },
                 create: { userId: creatorData.referredById, balance: referralBonus }
               });
 
-              // Creamos el recibo vital
+              // Recibo de promoción
               await db.transaction.create({
                 data: { 
                   senderId: creatorId, 
@@ -191,8 +214,7 @@ exports.createPaymentIntent = async (req, res) => {
                 }
               });
             } else {
-              // 🛑 EL TIEMPO EXPIRÓ
-              console.log(`⏱️ Referido expirado: @${creatorData.username} superó los 5 meses. No hay comisión para el padrino.`);
+              console.log(`⏱️ Referido expirado: @${creatorData.username} superó los 5 meses. No hay comisión.`);
             }
           }
         }
@@ -242,7 +264,6 @@ exports.createPaymentIntent = async (req, res) => {
           notificationMessage = `@${fan.username} te ha enviado una propina de $${finalAmount}! 💸 "${description || '¡Gracias!'}"`;
           notificationType = 'TIP';
           
-        // 🦅 EL PARCHE ANTI-FUGAS (Para evitar notificaciones vacías)
         } else {
           notificationMessage = `@${fan.username} realizó un pago de $${finalAmount}. 💰`;
           notificationType = 'MONEY';
@@ -259,16 +280,15 @@ exports.createPaymentIntent = async (req, res) => {
             }
           });
         }
-      }
-    });
+      });
 
-    // 🚀 RESPUESTA AL FRONTEND
-    res.status(200).json({ 
-      success: true, 
-      message: 'Procesado por Covra Pay', 
-      receipt: payramReceiptId,
-      checkoutUrl: type === 'CREDIT_TOPUP' ? '/dashboard' : undefined 
-    });
+      // 🚀 RESPUESTA AL FRONTEND PARA PAGOS INTERNOS
+      return res.status(200).json({ 
+        success: true, 
+        message: 'Procesado por Covra Pay', 
+        receipt: payramReceiptId
+      });
+    }
 
   } catch (error) {
     console.error("Error Covra Pay:", error);
