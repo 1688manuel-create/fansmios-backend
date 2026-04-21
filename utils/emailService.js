@@ -9,7 +9,7 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // ⚠️ REGLA DE ORO DE RESEND (FASE DE PRUEBAS)
 // Mientras no verifiques tu dominio real (fansmio.com) en su panel, 
 // Resend te obliga a usar este correo de remitente por seguridad:
-const fromEmail = 'onboarding@resend.dev';
+const fromEmail = 'soporte@fansmio.com'; // o 'no-reply@fansmio.com'
 
 // =========================================================
 // 1. FUNCIÓN ORIGINAL (Verificación y Recuperar Contraseña)
