@@ -84,7 +84,7 @@ exports.createPaymentIntent = async (req, res) => {
 
       // 2. ⚡ LLAMADA A LA API DE PAYRAM PARA GENERAR ENLACE
       try {
-        // 🛡️ Limpiamos la URL por si tiene un "/" extra al final
+        // 🛡️ Limpiamos la URL por si tiene un "/" extra al final en Coolify
         const baseUrl = process.env.PAYRAM_BASE_URL.replace(/\/$/, '');
         
         const payramResponse = await fetch(`${baseUrl}/api/v1/payment`, {
@@ -93,28 +93,28 @@ exports.createPaymentIntent = async (req, res) => {
             'API-Key': process.env.PAYRAM_API_KEY,
             'Content-Type': 'application/json'
           },
-          // 🔥 ENVIAMOS EXACTAMENTE EL FORMATO OFICIAL DE PAYRAM
+          // 🔥 EL IDIOMA EXACTO DE TU MANUAL PAYRAM
           body: JSON.stringify({
-            amount: finalAmount.toString(), // PayRam prefiere texto en los montos
-            currency: 'USDC',
-            merchantUserId: fanId.toString()
+            customerEmail: fan.email,
+            customerID: fanId.toString(),
+            amountInUSD: finalAmount
           })
         });
 
-        // 🛡️ CAPTURA TÁCTICA: Leemos la respuesta cruda antes de convertirla
+        // 🛡️ Leemos la respuesta
         const rawText = await payramResponse.text();
         
         let payramData;
         try {
           payramData = JSON.parse(rawText);
         } catch (parseError) {
-          console.error(`🚨 ALERTA: PayRam no devolvió datos, devolvió una página web (Código HTTP: ${payramResponse.status})`);
+          console.error(`🚨 ALERTA: PayRam devolvió código ${payramResponse.status}`);
           console.error(`Contenido recibido: ${rawText.substring(0, 300)}...`);
-          throw new Error('La conexión rebotó. Revisa los logs de tu terminal.');
+          throw new Error('La conexión rebotó. Revisa la consola.');
         }
 
         if (!payramResponse.ok) {
-          throw new Error(payramData.message || 'Error interno de PayRam al generar enlace.');
+          throw new Error('Error interno de PayRam al generar enlace.');
         }
 
         // 3. Devolvemos el checkout de PayRam al Frontend
@@ -122,14 +122,14 @@ exports.createPaymentIntent = async (req, res) => {
           success: true, 
           message: 'Redirigiendo a pasarela segura...', 
           receipt: payramReceiptId,
-          checkoutUrl: payramData.paymentUrl || payramData.url // Dependiendo de la versión
+          // 👈 CLAVE: Extraemos la URL exactamente como dice el manual
+          checkoutUrl: payramData.url 
         });
 
       } catch (payramError) {
         console.error("🚨 Error de conexión con PayRam:", payramError);
-        return res.status(500).json({ error: payramError.message || 'El servidor de pagos no responde. Intenta más tarde.' });
+        return res.status(500).json({ error: payramError.message || 'El servidor de pagos no responde.' });
       }
-
     } else {
       // ==========================================
       // 🛍️ RUTA 2: PAGOS INTERNOS A CREADORES (PPV, Tips, Subs)
