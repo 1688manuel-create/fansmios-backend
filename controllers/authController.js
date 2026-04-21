@@ -19,23 +19,31 @@ exports.register = async (req, res) => {
     }
 
     // ==========================================
-    // 🛡️ ESCUDO ANTI-CORREOS (FUERZA BRUTA)
+    // 🛡️ ESCUDO ANTI-CORREOS (ESCALA GLOBAL)
     // ==========================================
     // 1. Limpiamos cualquier basura oculta, espacios invisibles o comillas que mande el frontend
     const cleanEmail = String(email).toLowerCase().replace(/[\s'"]/g, ''); 
     
-    const allowedDomains = [
-      '@gmail.com', '@yahoo.com', '@outlook.com', 
-      '@hotmail.com', '@icloud.com', '@live.com', '@msn.com'
+    // 2. Dominios fijos globales y premium
+    const allowedExactDomains = [
+      '@gmail.com', '@icloud.com', '@mac.com', '@me.com', 
+      '@protonmail.com', '@pm.me', '@gmx.com', '@yandex.com'
     ];
 
-    // 2. Verificamos si el correo TERMINA con alguno de esos dominios permitidos
-    const isValidDomain = allowedDomains.some(domain => cleanEmail.endsWith(domain));
+    // 3. Comprobamos si es un dominio exacto
+    let isValidDomain = allowedExactDomains.some(domain => cleanEmail.endsWith(domain));
+
+    // 4. Comprobamos las franquicias globales (Acepta .com, .es, .com.mx, .co.uk, etc.)
+    if (!isValidDomain) {
+      // Esta fórmula matemática detecta si es outlook, hotmail, yahoo, msn o live sin importar el país
+      const regionalRegex = /@(yahoo|outlook|hotmail|live|msn)\.[a-z]{2,3}(\.[a-z]{2})?$/;
+      isValidDomain = regionalRegex.test(cleanEmail);
+    }
 
     if (!isValidDomain) {
       console.log("🚨 ALERTA DE SISTEMA: Correo bloqueado ->", cleanEmail);
       return res.status(403).json({ 
-        error: 'Por seguridad, solo aceptamos correos de Gmail, Outlook, Yahoo o iCloud. No se permiten correos temporales. 🛑' 
+        error: 'Por seguridad anti-bots, solo aceptamos correos reconocidos (Gmail, Outlook, Yahoo, iCloud, Proton). No se permiten correos temporales. 🛑' 
       });
     }
     // ==========================================
