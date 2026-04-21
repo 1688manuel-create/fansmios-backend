@@ -1,40 +1,36 @@
 // backend/utils/emailService.js
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-// 🔥 CORRECCIÓN TÁCTICA: Cambiamos al puerto 587 (STARTTLS) que es menos probable que esté bloqueado
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: process.env.EMAIL_PORT || 587, 
-  secure: false, // 👈 false es obligatorio cuando usamos el puerto 587
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// 🔥 Inicializamos la turbina de Resend con tu clave secreta
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// ⚠️ REGLA DE ORO DE RESEND (FASE DE PRUEBAS)
+// Mientras no verifiques tu dominio real (fansmio.com) en su panel, 
+// Resend te obliga a usar este correo de remitente por seguridad:
+const fromEmail = 'onboarding@resend.dev';
 
 // =========================================================
-// 1. FUNCIÓN ORIGINAL (Para correos como "Recuperar Contraseña")
+// 1. FUNCIÓN ORIGINAL (Verificación y Recuperar Contraseña)
 // =========================================================
 const sendEmail = async (to, subject, text) => {
   try {
-    const mailOptions = {
-      from: `"FansMio Soporte" <${process.env.EMAIL_USER}>`,
+    const data = await resend.emails.send({
+      from: `FansMio Soporte <${fromEmail}>`,
       to: to,
       subject: subject,
-      text: text,
-    };
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ Correo básico enviado exitosamente a: ${to}`);
+      html: `<p>${text.replace(/\n/g, '<br>')}</p>`, // Resend prefiere formato HTML
+    });
+    console.log(`✅ Correo enviado exitosamente con Resend a: ${to}`);
   } catch (error) {
-    console.error('❌ Error enviando correo básico:', error);
-    throw error; // 👈 ¡ESTO ES VITAL! Lanzamos el error para que el AuthController lo atrape y borre la cuenta atascada
+    console.error('❌ Error enviando correo con Resend:', error);
+    throw error;
   }
 };
 
 // =========================================================
-// 2. NUEVA FUNCIÓN INTELIGENTE (Para Notificaciones de Ganancias/Seguidores)
+// 2. NUEVA FUNCIÓN INTELIGENTE (Notificaciones)
 // =========================================================
 const sendNotificationEmail = async (userId, type, subject, text) => {
   try {
@@ -69,8 +65,8 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
       </div>
     `;
 
-    await transporter.sendMail({
-      from: `"FansMio Notificaciones" <${process.env.EMAIL_USER}>`,
+    await resend.emails.send({
+      from: `FansMio Notificaciones <${fromEmail}>`,
       to: user.email,
       subject: subject,
       html: htmlTemplate,
@@ -79,8 +75,7 @@ const sendNotificationEmail = async (userId, type, subject, text) => {
     console.log(`📧 Correo de notificación enviado a ${user.email} (Tipo: ${type})`);
 
   } catch (error) {
-    console.error("❌ Error al enviar correo inteligente:", error);
-    // Aquí no lanzamos error porque las notificaciones no deben interrumpir el sistema
+    console.error("❌ Error al enviar correo inteligente con Resend:", error);
   }
 };
 
