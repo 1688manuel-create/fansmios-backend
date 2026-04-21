@@ -70,33 +70,42 @@ exports.getPendingKyc = async (req, res) => {
 // ✅ 2. APROBAR IDENTIDAD (El Veredicto Positivo)
 // ==========================================
 exports.approveKyc = async (req, res) => {
-  try {
-    const profileId = req.params.profileId || req.body.profileId || req.body.id;
-    if (!profileId) return res.status(400).json({ error: 'ID no proporcionado.' });
+  try {
+    const profileId = req.params.profileId || req.body.profileId || req.body.id;
+    if (!profileId) return res.status(400).json({ error: 'ID no proporcionado.' });
 
-    const profile = await prisma.creatorProfile.findUnique({ where: { id: profileId } });
-    if (!profile) return res.status(400).json({ error: 'Expediente no existe.' });
+    const profile = await prisma.creatorProfile.findUnique({ where: { id: profileId } });
+    if (!profile) return res.status(400).json({ error: 'Expediente no existe.' });
 
-    await prisma.$transaction(async (tx) => {
-      await tx.creatorProfile.update({
-        where: { id: profileId },
-        data: { kycStatus: 'APPROVED', kycRejectionReason: null } // Limpiamos la razón si antes fue rechazado
-      });
+    await prisma.$transaction(async (tx) => {
+      // 1. Aprobamos los papeles en la Bóveda Legal
+      await tx.creatorProfile.update({
+        where: { id: profileId },
+        data: { kycStatus: 'APPROVED', kycRejectionReason: null } // Limpiamos la razón si antes fue rechazado
+      });
 
-      await tx.notification.create({
-        data: {
-          userId: profile.userId,
-          type: 'kyc_approved',
-          content: `✅ ¡Felicidades! Tu Identidad Oficial ha sido verificada.`,
-          link: '/dashboard/wallet'
-        }
-      });
-    });
+      // 🔥 2. EL ASCENSO AUTOMÁTICO: Cambiamos su rol a CREADOR
+      await tx.user.update({
+        where: { id: profile.userId },
+        data: { role: 'CREATOR' } // Esto es lo que desbloquea su panel de control completo
+      });
 
-    res.status(200).json({ message: 'Identidad aprobada con éxito.' });
-  } catch (error) {
-    res.status(500).json({ error: "Error al procesar la aprobación." });
-  }
+      // 3. Disparamos la notificación de éxito
+      await tx.notification.create({
+        data: {
+          userId: profile.userId,
+          type: 'kyc_approved',
+          content: `✅ ¡Felicidades! Tu Identidad Oficial ha sido verificada. Ya puedes monetizar.`,
+          link: '/dashboard/wallet'
+        }
+      });
+    });
+
+    res.status(200).json({ message: 'Identidad aprobada y usuario ascendido a Creador con éxito.' });
+  } catch (error) {
+    console.error("Error al procesar la aprobación:", error);
+    res.status(500).json({ error: "Error al procesar la aprobación." });
+  }
 };
 
 // ==========================================
