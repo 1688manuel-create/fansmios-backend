@@ -55,3 +55,7 @@ async function purgaTotal() {
 }
 
 purgaTotal();
+
+
+
+/// Este script es una herramienta de limpieza masiva para eliminar todos los usuarios de prueba y sus datos asociados, dejando solo al ADMIN intacto. Es útil para resetear al final usar el node purga.js en backend coolify.el entorno de desarrollo o staging después de pruebas intensas. ¡Úsalo con precaución!
