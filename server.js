@@ -14,12 +14,11 @@ const { AccessToken } = require('livekit-server-sdk');
 // Importación de Tareas en Segundo Plano (Cron Jobs)
 const { startSubscriptionCron } = require('./utils/subscriptionCron'); 
 const startBalanceReleaser = require('./cron/balanceReleaser');
-const startAccountGuardian = require('./cron/accountGuardian'); // 👈 Importas el nuevo 
+const startAccountGuardian = require('./cron/accountGuardian'); 
 const cron = require('node-cron'); 
 const postController = require('./controllers/postController');
-// Importamos las rutas de estadísticas
-const statsRoutes = require('./routes/statsRoutes');
 
+// Importamos las rutas
 const seriesRoutes = require('./routes/seriesRoutes');
 
 // ==========================================
@@ -122,12 +121,10 @@ app.use('/api/settings', require('./routes/settingsRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/referrals', require('./routes/referralRoutes'));
-app.use('/api/stats', require('./routes/statsRoutes'));
+app.use('/api/stats', require('./routes/statsRoutes')); // ✅ Ruta de stats única y limpia
 app.use('/api/profile/kyc', require('./routes/kycRoutes'));
 app.use('/api/2fa', require('./routes/auth2faRoutes'));
 app.use('/api/series', seriesRoutes);
-// Conectamos la puerta para que el frontend la encuentre
-app.use('/api/stats', statsRoutes);
 
 // 🔥 NUEVO: RUTA PARA EL BOLETO DE LIVEKIT (EXPERIENCIA TIKTOK)
 app.post('/api/livekit/token', async (req, res) => {
@@ -163,12 +160,14 @@ app.post('/api/livekit/token', async (req, res) => {
 // 6. TRABAJADORES Y MANEJO DE ERRORES
 // ==========================================
 try { require('./workers/broadcastWorker'); } catch(e) {}
+
+// 🔥 SENTRY DEBE IR EXACTAMENTE AQUÍ (Después de las rutas)
 Sentry.setupExpressErrorHandler(app);
 
 // 🤖 ENCENDIDO DE CRON JOBS (ROBOTS EN SEGUNDO PLANO)
 startSubscriptionCron(); 
 startBalanceReleaser();
-startAccountGuardian(); // 👈 ¡LISTO! El Guardián ya patrulla a las 3 AM 
+startAccountGuardian(); 
 console.log('🤖 Motores de Automatización (Suscripciones y Saldos) Activados.');
 
 // 🔥 EL PERRO GUARDIÁN: Patrulla Anti-IA todos los días a las 3:00 AM
