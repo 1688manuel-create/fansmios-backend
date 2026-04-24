@@ -59,6 +59,7 @@ exports.createPaymentIntent = async (req, res) => {
     
     // Identificador único para el rastreo en la Blockchain
     const payramReceiptId = `PAYRAM-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+    console.log("🎯 ATENCIÓN COMANDANTE: EL CÓDIGO DEL RECIBO ES:", payramReceiptId);
 
     // Obtener datos del fan
     const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true, email: true } });
