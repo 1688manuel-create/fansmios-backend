@@ -8,11 +8,11 @@ const prisma = new PrismaClient();
 
 exports.handlePayRamWebhook = async (req, res) => {
   try {
-    // 1. 🛡️ ESCUDO DE SEGURIDAD: Verificar que el mensaje realmente viene de tu PayRam
-    // PayRam envía la API Key en los headers para que nadie pueda fingir un pago falso
-    const apiKey = req.headers['api-key'] || req.headers['x-api-key'];
+    // 1. 🛡️ ESCUDO ADAPTATIVO: Buscar la llave en la URL (?key=...)
+    const apiKey = req.query.key || req.headers['api-key'] || req.headers['x-api-key'];
+    
     if (apiKey !== process.env.PAYRAM_API_KEY) {
-      console.error("🚨 INTRUSO DETECTADO: Webhook rechazado por API Key inválida.");
+      console.error("🚨 INTRUSO DETECTADO: Webhook rechazado por llave inválida.");
       return res.status(401).json({ error: 'No autorizado' });
     }
 
@@ -20,16 +20,16 @@ exports.handlePayRamWebhook = async (req, res) => {
     console.log("📡 Señal de PayRam recibida:", payload);
 
     // 2. Extraer los datos del recibo
-    // Dependiendo de la versión del SDK, PayRam puede enviarlo como referenceId o reference_id
-    const referenceId = payload.referenceId || payload.reference_id;
-    const status = payload.status || payload.event; 
+    // Ampliamos el radar por si PayRam cambió los nombres de sus variables en su última actualización
+    const referenceId = payload.referenceId || payload.reference_id || payload.orderId || payload.id;
+    const status = payload.status || payload.event || payload.paymentStatus; 
 
     if (!referenceId) {
       return res.status(400).json({ error: 'El payload no incluye un ID de referencia.' });
     }
 
     // 3. Verificamos si el pago fue exitoso
-    const isSuccess = status === 'PAID' || status === 'COMPLETED' || status === 'SUCCESS' || status === 'payment.success';
+    const isSuccess = status === 'PAID' || status === 'COMPLETED' || status === 'SUCCESS' || status === 'payment.success' || status === 'successful';
 
     if (isSuccess) {
       // Buscamos la transacción PENDIENTE en nuestra base de datos
@@ -82,7 +82,7 @@ exports.handlePayRamWebhook = async (req, res) => {
     }
 
     // 5. Confirmar recepción a PayRam
-    // Siempre debemos responder 200 OK rápido para que PayRam sepa que lo recibimos y no vuelva a intentar.
+    // Siempre debemos responder 200 OK rápido para que PayRam sepa que lo recibimos.
     res.status(200).send('Webhook procesado correctamente');
 
   } catch (error) {

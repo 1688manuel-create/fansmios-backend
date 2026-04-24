@@ -93,11 +93,12 @@ exports.createPaymentIntent = async (req, res) => {
             'API-Key': process.env.PAYRAM_API_KEY,
             'Content-Type': 'application/json'
           },
-          // 🔥 EL IDIOMA EXACTO DE TU MANUAL PAYRAM
           body: JSON.stringify({
             customerEmail: fan.email,
             customerID: fanId.toString(),
-            amountInUSD: finalAmount
+            amountInUSD: finalAmount,
+            // 🔥 AQUÍ ESTÁ LA MAGIA: El boleto de regreso a la billetera
+            redirectUrl: "https://fansmio.com/dashboard/wallet" 
           })
         });
 
