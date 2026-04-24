@@ -6,7 +6,7 @@ const { sendNotificationEmail } = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushService');
 
 // ==========================================
-// 🏦 MOTOR COVRA PAY: PROCESADOR Y PUENTE PAYRAM
+// 🏦 MOTOR COVRA: PROCESADOR INTERNO DE FANSMIOS
 // ==========================================
 
 exports.createPaymentIntent = async (req, res) => {
@@ -57,82 +57,21 @@ exports.createPaymentIntent = async (req, res) => {
     const platformFee = finalAmount * feePercent; 
     const netAmount = finalAmount - platformFee;
     
-    // Identificador único para el rastreo en la Blockchain
-    const payramReceiptId = `PAYRAM-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
-    console.log("🎯 EL RECIBO SECRETO ES:", payramReceiptId);
+    // Identificador único para el rastreo interno
+    const internalReceiptId = `FSM-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 
-    // Obtener datos del fan
     const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true, email: true } });
 
     // ==========================================
-    // 💳 RUTA 1: RECARGA DE BILLETERA (RAMPA EXTERNA PAYRAM)
+    // 💳 RUTA 1: RECARGA DE BILLETERA (AHORA VÍA DEPAY WEB3)
     // ==========================================
     if (type === 'CREDIT_TOPUP') {
-      
-      // 1. Guardamos la transacción como PENDIENTE (No se asigna saldo todavía)
-      await prisma.transaction.create({
-        data: { 
-          senderId: fanId, 
-          receiverId: fanId, 
-          type: 'CREDIT_TOPUP', 
-          status: 'PENDING', // ⚠️ En espera del Webhook de PayRam
-          amount: finalAmount, 
-          platformFee, 
-          netAmount, 
-          payramReceiptId 
-        }
+      // Si por alguna razón el frontend viejo intenta llamar a esta ruta, lo bloqueamos amablemente.
+      // Las recargas ahora viajan directamente por el widget de DePay en el frontend.
+      return res.status(400).json({ 
+        error: 'Las recargas ahora se procesan instantáneamente vía Web3. Por favor, usa el nuevo botón de recarga.' 
       });
 
-      // 2. ⚡ LLAMADA A LA API DE PAYRAM PARA GENERAR ENLACE
-      try {
-        // 🛡️ Limpiamos la URL por si tiene un "/" extra al final en Coolify
-        const baseUrl = process.env.PAYRAM_BASE_URL.replace(/\/$/, '');
-        
-        const payramResponse = await fetch(`${baseUrl}/api/v1/payment`, {
-          method: 'POST',
-          headers: {
-            'API-Key': process.env.PAYRAM_API_KEY,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            customerEmail: fan.email,
-            customerID: fanId.toString(),
-            amountInUSD: finalAmount,
-            referenceId: payramReceiptId,
-            // 🔥 AQUÍ ESTÁ LA MAGIA: El boleto de regreso a la billetera
-            redirectUrl: "https://fansmio.com/dashboard/wallet" 
-          })
-        });
-
-        // 🛡️ Leemos la respuesta
-        const rawText = await payramResponse.text();
-        
-        let payramData;
-        try {
-          payramData = JSON.parse(rawText);
-        } catch (parseError) {
-          console.error(`🚨 ALERTA: PayRam devolvió código ${payramResponse.status}`);
-          console.error(`Contenido recibido: ${rawText.substring(0, 300)}...`);
-          throw new Error('La conexión rebotó. Revisa la consola.');
-        }
-
-        if (!payramResponse.ok) {
-          throw new Error('Error interno de PayRam al generar enlace.');
-        }
-
-        // 3. Devolvemos el checkout de PayRam al Frontend
-        return res.status(200).json({ 
-          success: true, 
-          message: 'Redirigiendo a pasarela segura...', 
-          receipt: payramReceiptId,
-          // 👈 CLAVE: Extraemos la URL exactamente como dice el manual
-          checkoutUrl: payramData.url 
-        });
-
-      } catch (payramError) {
-        console.error("🚨 Error de conexión con PayRam:", payramError);
-        return res.status(500).json({ error: payramError.message || 'El servidor de pagos no responde.' });
-      }
     } else {
       // ==========================================
       // 🛍️ RUTA 2: PAGOS INTERNOS A CREADORES (PPV, Tips, Subs)
@@ -167,7 +106,7 @@ exports.createPaymentIntent = async (req, res) => {
             postId, 
             bundleId, 
             attachedMessage: targetMessageId, 
-            payramReceiptId 
+            payramReceiptId: internalReceiptId // Guardamos el ID interno
           }
         });
 
@@ -300,13 +239,13 @@ exports.createPaymentIntent = async (req, res) => {
       // 🚀 RESPUESTA AL FRONTEND PARA PAGOS INTERNOS
       return res.status(200).json({ 
         success: true, 
-        message: 'Procesado por Covra Pay', 
-        receipt: payramReceiptId
+        message: 'Procesado internamente con éxito', 
+        receipt: internalReceiptId
       });
     }
 
   } catch (error) {
-    console.error("Error Covra Pay:", error);
+    console.error("Error en Transacción Interna:", error);
     res.status(500).json({ error: error.message || 'Error en el motor de pagos interno.' });
   }
 };

@@ -1,16 +1,18 @@
+// backend/routes/paymentRoutes.js
 const express = require('express');
 const router = express.Router();
 const paymentController = require('../controllers/paymentController');
 const { verifyToken } = require('../middlewares/authMiddleware');
 
 // ==========================================
-// 💳 NÚCLEO FINANCIERO PAYRAM (Procesamiento Interno)
+// 💳 NÚCLEO FINANCIERO FANSMIOS (Motor Interno Covra)
 // ==========================================
 
 /**
- * Generador Maestro de Órdenes (Suscripciones, PPV, Tips, Bundles)
- * Esta es la ruta central que dispara el motor de PayRam.
- * Procesa el pago de forma instantánea sin depender de webhooks externos.
+ * Generador Maestro de Órdenes Internas (Suscripciones, PPV, Tips, Bundles)
+ * Esta es la ruta central que dispara el motor interno de Fansmios.
+ * Procesa los pagos y transfiere el saldo entre usuarios de forma instantánea.
+ * (🔥 Las recargas de dinero externo ahora viajan vía Web3 por /api/depay)
  */
 router.post('/create-intent', verifyToken, paymentController.createPaymentIntent);
 

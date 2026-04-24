@@ -102,7 +102,6 @@ app.use('/api/discover', require('./routes/discoverRoutes'));
 app.use('/api/bookmarks', require('./routes/bookmarkRoutes'));
 
 app.use('/api/payments', require('./routes/paymentRoutes'));
-app.use('/api/webhooks', require('./routes/webhookRoutes')); 
 app.use('/api/finance', require('./routes/monetizationRoutes'));
 app.use('/api/wallet', require('./routes/walletRoutes')); 
 
