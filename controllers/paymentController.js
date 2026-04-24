@@ -97,6 +97,7 @@ exports.createPaymentIntent = async (req, res) => {
             customerEmail: fan.email,
             customerID: fanId.toString(),
             amountInUSD: finalAmount,
+            referenceId: payramReceiptId,
             // 🔥 AQUÍ ESTÁ LA MAGIA: El boleto de regreso a la billetera
             redirectUrl: "https://fansmio.com/dashboard/wallet" 
           })
