@@ -105,6 +105,10 @@ app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/webhooks', require('./routes/webhookRoutes')); 
 app.use('/api/finance', require('./routes/monetizationRoutes'));
 app.use('/api/wallet', require('./routes/walletRoutes')); 
+
+// 🔥 NUEVO: CONEXIÓN DIRECTA CON DEPAY (WEB3)
+app.use('/api/depay', require('./routes/depayRouter'));
+
 app.use('/api/bundles', require('./routes/bundleRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
 app.use('/api/promotions', require('./routes/promotionRoutes')); 
