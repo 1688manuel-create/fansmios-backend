@@ -27,7 +27,7 @@ exports.handlePayRamWebhook = async (req, res) => {
     }
 
     // 3. 🔥 NUEVO: Aceptamos pagos completos, parciales y sobrepagos
-    const validStatuses = ['PAID', 'COMPLETED', 'SUCCESS', 'payment.success', 'successful', 'PARTIALLY_FILLED', 'OVERPAID'];
+    const validStatuses = ['PAID', 'COMPLETED', 'SUCCESS', 'payment.success', 'successful', 'PARTIALLY_FILLED', 'OVERPAID', 'OVER_FILLED'];
     const isSuccess = validStatuses.includes(status);
 
     if (isSuccess) {
