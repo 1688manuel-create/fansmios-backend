@@ -4,28 +4,29 @@ const prisma = new PrismaClient();
 exports.handlePayRamWebhook = async (req, res) => {
   try {
     const payload = req.body;
-    console.log("📡 [PAYRAM RADAR] Webhook recibido:", payload);
+    console.log("📡 [COVRA RADAR] Webhook recibido con status:", payload.status);
 
-    // 1. PayRam exige que le respondamos un 200 OK rápido para que sepa que recibimos el mensaje
+    // 1. Respondemos rápido con un 200 OK para que Covra Pay no reintente el envío
     res.status(200).send('Webhook recibido con éxito');
 
-    // 2. Extraemos los datos del pago (Ajusta estos campos según la documentación exacta de PayRam)
-    // Normalmente envían un status, el monto y el ID de la transacción o del usuario
-    const status = payload.status || payload.payment_status; 
-    const amount = parseFloat(payload.amount || payload.net_amount || 0);
-    const userId = payload.custom_id || payload.metadata?.userId; // Depende de cómo enviaste el ID en el checkout
+    // 2. Extraemos los datos exactos del diccionario de Covra Pay
+    const status = payload.status; 
+    // Usamos filled_amount_in_usd para inyectar los dólares exactos que llegaron
+    const amount = parseFloat(payload.filled_amount_in_usd || 0); 
+    // Covra Pay guarda el ID de tu Fan en 'customer_id'
+    const userId = payload.customer_id; 
 
-    // 3. Verificamos que el pago se haya completado con éxito
-    if (status === 'completed' || status === 'success' || status === 'paid') {
+    // 3. Aceptamos pagos exactos (FILLED) o pagos con centavos extra (OVER_FILLED)
+    if (status === 'FILLED' || status === 'OVER_FILLED' || status === 'COMPLETED') {
       
       if (!userId) {
-        console.error("❌ Error: El webhook de PayRam no incluyó el ID del usuario.");
+        console.error("❌ Error: El webhook no incluyó el ID del usuario.");
         return;
       }
 
-      console.log(`💰 Procesando recarga de $${amount} para el usuario ID: ${userId}`);
+      console.log(`💰 ¡Bóveda Abierta! Inyectando $${amount} al usuario ID: ${userId}`);
 
-      // 4. Inyectamos el saldo en la billetera del usuario en Prisma
+      // 4. Inyectamos el saldo exacto en la billetera del usuario
       await prisma.user.update({
         where: { id: userId },
         data: {
@@ -35,25 +36,26 @@ exports.handlePayRamWebhook = async (req, res) => {
         }
       });
 
-      // 5. Registramos el movimiento en el historial de transacciones
+      // 5. Registramos el movimiento en su estado de cuenta
       await prisma.transaction.create({
         data: {
           amount: amount,
-          netAmount: amount,
+          netAmount: amount, // En recargas no hay comisión de plataforma
           type: 'CREDIT_TOPUP',
           status: 'COMPLETED',
-          senderId: userId, // En una recarga, el sender y receiver es el mismo usuario
+          senderId: userId, 
           receiverId: userId,
-          description: `Recarga de saldo vía PayRam`
+          description: `Recarga de saldo vía Covra Pay`
         }
       });
 
-      console.log(`✅ ¡Bóveda actualizada! Saldo de $${amount} inyectado al usuario ${userId}.`);
+      console.log(`✅ ¡Misión Exitosa! Bóveda del Fan actualizada con $${amount}.`);
     } else {
-      console.log(`⚠️ Webhook ignorado. Estado del pago: ${status}`);
+      // Ignoramos en silencio los estados 'OPEN' o 'PENDING'
+      console.log(`⏳ Webhook en espera. Estado del pago: ${status}`);
     }
 
   } catch (error) {
-    console.error("❌ Error crítico procesando webhook de PayRam:", error);
+    console.error("❌ Error crítico procesando webhook de Covra Pay:", error);
   }
 };
