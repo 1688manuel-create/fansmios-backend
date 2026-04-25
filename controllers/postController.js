@@ -196,7 +196,20 @@ exports.getAllPosts = async (req, res) => {
         _count: { select: { comments: true } },
         purchases: { where: { fanId: userId } },
         likes: { select: { id: true, emoji: true, userId: true } }, 
-        comments: { include: { user: { select: { username: true } } }, orderBy: { createdAt: 'asc' } } 
+        
+        // 🔥 LA CORRECCIÓN MAESTRA ESTÁ AQUÍ
+        comments: { 
+          include: { 
+            user: { 
+              select: { 
+                username: true,
+                id: true, // Siempre es bueno traer el ID
+                creatorProfile: { select: { profileImage: true } } // 📸 ¡EXTRAEMOS LA FOTO!
+              } 
+            } 
+          }, 
+          orderBy: { createdAt: 'asc' } 
+        } 
       }
     });
 
@@ -254,7 +267,21 @@ exports.getCreatorPosts = async (req, res) => {
         user: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } }, subscribers: { where: { fanId: userId, status: 'ACTIVE' } } } }, 
         _count: { select: { comments: true } }, 
         likes: { select: { id: true, emoji: true, userId: true } },
-        purchases: { where: { fanId: userId } }
+        purchases: { where: { fanId: userId } },
+        
+        // 🔥 ESTE ES EL RADAR PARA EXTRAER LA FOTO DEL FAN EN LOS COMENTARIOS
+        comments: { 
+          include: { 
+            user: { 
+              select: { 
+                username: true,
+                id: true,
+                creatorProfile: { select: { profileImage: true } }
+              } 
+            } 
+          }, 
+          orderBy: { createdAt: 'asc' } 
+        } 
       }
     });
     
