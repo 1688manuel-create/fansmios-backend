@@ -64,41 +64,36 @@ exports.createPaymentIntent = async (req, res) => {
     const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true, email: true } });
 
     // ==========================================
-    // 💳 RUTA 1: RECARGA DE BILLETERA (VÍA PAYRAM)
+    // 💳 RUTA 1: RECARGA DE BILLETERA (VÍA PAYRAM / COVRA PAY)
     // ==========================================
     if (type === 'CREDIT_TOPUP') {
       
-      console.log(`[PAYRAM] Generando enlace de recarga para usuario ${fanId} - Monto: $${finalAmount}`);
+      console.log(`[PAYRAM] Generando enlace de recarga para usuario ${fan.username} - Monto: $${finalAmount}`);
 
-      // Generar el intento de pago en la pasarela PayRam
-      // ⚠️ Asegúrate de que esta URL sea la correcta de tu API de PayRam
-      // 🎯 Ahora sí, el misil apunta directamente a tu servidor privado
-      const payramResponse = await axios.post(`${process.env.PAYRAM_BASE_URL}/v1/payments/create`, {
-        amount: finalAmount,
-        currency: 'USD',
-        description: description || `Recarga de Billetera en Fansmios`,
-        metadata: {
-          userId: fanId,
-          type: type
-        },
-        redirect_url: 'https://fansmio.com/dashboard' 
+      // 🎯 DISPARO EXACTO SEGÚN LA DOCUMENTACIÓN OFICIAL DE COVRA PAY
+      const payramResponse = await axios.post(`${process.env.PAYRAM_BASE_URL}/api/v1/payment`, {
+        customerEmail: fan.email,     // 👈 Exigido por tu API
+        customerID: fanId.toString(), // 👈 Exigido por tu API
+        amountInUSD: finalAmount      // 👈 Exigido por tu API
       }, {
         headers: {
-          'Authorization': `Bearer ${process.env.PAYRAM_API_KEY}`,
+          'API-Key': process.env.PAYRAM_API_KEY, // 👈 El header exacto de tu API
           'Content-Type': 'application/json'
         }
       });
 
-      const checkoutUrl = payramResponse.data.checkout_url || payramResponse.data.url;
+      // Tu API devuelve directamente un objeto con la propiedad "url"
+      const checkoutUrl = payramResponse.data.url;
 
       if (!checkoutUrl) {
-        throw new Error("PayRam no devolvió una URL de checkout válida.");
+        throw new Error("Covra Pay no devolvió una URL de checkout válida.");
       }
 
       return res.status(200).json({ 
         success: true, 
         checkoutUrl: checkoutUrl 
       });
+
 
     } else {
       // ==========================================
