@@ -139,13 +139,13 @@ exports.updateProfile = async (req, res) => {
 };
 
 // ==========================================
-// 3. OBTENER EL PERFIL PÚBLICO DEL CREADOR/ADMIN (Con Geo-Bloqueo 🌍🚫)
+// 3. OBTENER EL PERFIL PÚBLICO (Con Geo-Bloqueo 🌍🚫 y Soporte FAN 🌟)
 // ==========================================
 exports.getPublicProfile = async (req, res) => {
   try {
     const { username } = req.params; 
     
-    // Traemos al usuario y su configuración
+    // Traemos al usuario
     const user = await prisma.user.findUnique({
       where: { username: username.toLowerCase() },
       select: {
@@ -160,77 +160,59 @@ exports.getPublicProfile = async (req, res) => {
       }
     });
 
-    // 🔥 EL BYPASS: Ahora permitimos que pasen tanto CREATOR como ADMIN
-    if (!user || (user.role !== 'CREATOR' && user.role !== 'ADMIN')) {
+    // 👻 ELIMINAMOS EL FANTASMA 404
+    // Ahora si el usuario existe (sea Fan o Creador), lo dejamos pasar.
+    if (!user) {
       return res.status(404).json({ error: 'Perfil no encontrado' });
     }
 
-    // 🌍 INICIO DEL ESCUDO DE FRONTERA (GEO-BLOCKING)
+    // 🌟 ESCUDO PARA FANS: Si es un FAN, le creamos un perfil "virtual" para que el frontend no colapse
+    if (user.role === 'FAN' && !user.creatorProfile) {
+       user.creatorProfile = {
+         bio: "🌟 Verified Fan Supporter",
+         profileImage: null,
+         coverImage: null
+       };
+    }
+
+    // 🌍 INICIO DEL ESCUDO DE FRONTERA (Solo aplica a Creadores con lista negra)
     if (user.creatorProfile && user.creatorProfile.blockedCountries) {
-      // FIX de seguridad: Evitar error si hay proxy múltiple
       const rawIps = req.headers['x-forwarded-for'] || '';
       const clientIp = rawIps ? rawIps.split(',').trim() : req.socket.remoteAddress;
       
-      // Consultamos el país de esa IP
       const geo = geoip.lookup(clientIp);
       const visitorCountry = geo ? geo.country : null; 
       
-      // Si detectamos de qué país viene, comparamos con la lista negra
       if (visitorCountry) {
-        const blockedList = user.creatorProfile.blockedCountries
-          .split(',')
-          .map(country => country.trim().toUpperCase());
-
+        const blockedList = user.creatorProfile.blockedCountries.split(',').map(c => c.trim().toUpperCase());
         if (blockedList.includes(visitorCountry)) {
-          return res.status(403).json({ 
-            error: '🚫 Este perfil no está disponible en tu región.' 
-          });
+          return res.status(403).json({ error: '🚫 Este perfil no está disponible en tu región.' });
         }
       }
     }
     // 🌍 FIN DEL ESCUDO
 
-    // 🔥 NUEVA LÓGICA: ¿El visitante actual sigue o ESTÁ SUSCRITO a este creador?
     let isFollowing = false;
-    let isSubscribed = false; // 👈 NUEVO: Radar de Suscripción VIP
+    let isSubscribed = false; 
     
-    // Como usamos optionalAuth en la ruta, req.user existe SI el visitante está logueado
     if (req.user) {
-      // 1. Revisamos si lo sigue
       const followRecord = await prisma.follow.findUnique({
-        where: {
-          followerId_followingId: {
-            followerId: req.user.userId, // ID del visitante (Fan)
-            followingId: user.id         // ID del creador
-          }
-        }
+        where: { followerId_followingId: { followerId: req.user.userId, followingId: user.id } }
       });
-      
-      if (followRecord) {
-        isFollowing = true;
-      }
+      if (followRecord) isFollowing = true;
 
-      // 2. 👈 NUEVO: Revisamos si está SUSCRITO
       const subscriptionRecord = await prisma.subscription.findUnique({
-        where: {
-          fanId_creatorId: {
-            fanId: req.user.userId,
-            creatorId: user.id
-          }
-        }
+        where: { fanId_creatorId: { fanId: req.user.userId, creatorId: user.id } }
       });
-
-      // Si existe y está ACTIVA (o en periodo de gracia), encendemos la bandera VIP
       if (subscriptionRecord && (subscriptionRecord.status === 'ACTIVE' || subscriptionRecord.status === 'PAST_DUE')) {
         isSubscribed = true;
       }
     }
 
-    // 🔥 Agregamos isFollowing e isSubscribed a la respuesta para que el frontend lo sepa
     res.status(200).json({ 
       profile: user,
       isFollowing: isFollowing,
-      isSubscribed: isSubscribed // 👈 La llave mágica para ocultar el botón de pago
+      isSubscribed: isSubscribed
     });
     
   } catch (error) {
