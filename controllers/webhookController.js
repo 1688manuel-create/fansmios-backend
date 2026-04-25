@@ -6,17 +6,14 @@ exports.handlePayRamWebhook = async (req, res) => {
     const payload = req.body;
     console.log("📡 [COVRA RADAR] Webhook recibido con status:", payload.status);
 
-    // 1. Respondemos rápido con un 200 OK para que Covra Pay no reintente el envío
+    // 1. Respondemos rápido para que la pasarela deje de reintentar
     res.status(200).send('Webhook recibido con éxito');
 
-    // 2. Extraemos los datos exactos del diccionario de Covra Pay
     const status = payload.status; 
-    // Usamos filled_amount_in_usd para inyectar los dólares exactos que llegaron
     const amount = parseFloat(payload.filled_amount_in_usd || 0); 
-    // Covra Pay guarda el ID de tu Fan en 'customer_id'
     const userId = payload.customer_id; 
 
-    // 3. Aceptamos pagos exactos (FILLED) o pagos con centavos extra (OVER_FILLED)
+    // 2. Filtramos por estados de éxito
     if (status === 'FILLED' || status === 'OVER_FILLED' || status === 'COMPLETED') {
       
       if (!userId) {
@@ -24,23 +21,23 @@ exports.handlePayRamWebhook = async (req, res) => {
         return;
       }
 
-      console.log(`💰 ¡Bóveda Abierta! Inyectando $${amount} al usuario ID: ${userId}`);
+      console.log(`💰 ¡Inyectando combustible! $${amount} para el usuario ID: ${userId}`);
 
-      // 4. Inyectamos el saldo exacto en la billetera del usuario
-      await prisma.user.update({
-        where: { id: userId },
+      // 🎯 CORRECCIÓN: Actualizamos la tabla 'wallet', no la tabla 'user'
+      await prisma.wallet.update({
+        where: { userId: userId }, // Buscamos la billetera por el ID del dueño
         data: {
-          walletBalance: {
-            increment: amount
+          balance: {
+            increment: amount // Sumamos el dinero al campo 'balance'
           }
         }
       });
 
-      // 5. Registramos el movimiento en su estado de cuenta
+      // 3. Registramos la transacción en el historial
       await prisma.transaction.create({
         data: {
           amount: amount,
-          netAmount: amount, // En recargas no hay comisión de plataforma
+          netAmount: amount,
           type: 'CREDIT_TOPUP',
           status: 'COMPLETED',
           senderId: userId, 
@@ -49,13 +46,12 @@ exports.handlePayRamWebhook = async (req, res) => {
         }
       });
 
-      console.log(`✅ ¡Misión Exitosa! Bóveda del Fan actualizada con $${amount}.`);
+      console.log(`✅ ¡Misión Exitosa! Billetera del usuario ${userId} actualizada.`);
     } else {
-      // Ignoramos en silencio los estados 'OPEN' o 'PENDING'
-      console.log(`⏳ Webhook en espera. Estado del pago: ${status}`);
+      console.log(`⏳ Webhook ignorado. Estado: ${status}`);
     }
 
   } catch (error) {
-    console.error("❌ Error crítico procesando webhook de Covra Pay:", error);
+    console.error("❌ Error crítico en el radar de Webhooks:", error);
   }
 };
