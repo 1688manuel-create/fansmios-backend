@@ -2,6 +2,7 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const crypto = require('crypto');
+const axios = require('axios'); // <-- NECESARIO PARA LLAMAR A PAYRAM
 const { sendNotificationEmail } = require('../utils/emailService');
 const { sendPushNotification } = require('../utils/pushService');
 
@@ -63,13 +64,40 @@ exports.createPaymentIntent = async (req, res) => {
     const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true, email: true } });
 
     // ==========================================
-    // 💳 RUTA 1: RECARGA DE BILLETERA (AHORA VÍA DEPAY WEB3)
+    // 💳 RUTA 1: RECARGA DE BILLETERA (VÍA PAYRAM)
     // ==========================================
     if (type === 'CREDIT_TOPUP') {
-      // Si por alguna razón el frontend viejo intenta llamar a esta ruta, lo bloqueamos amablemente.
-      // Las recargas ahora viajan directamente por el widget de DePay en el frontend.
-      return res.status(400).json({ 
-        error: 'Las recargas ahora se procesan instantáneamente vía Web3. Por favor, usa el nuevo botón de recarga.' 
+      
+      console.log(`[PAYRAM] Generando enlace de recarga para usuario ${fanId} - Monto: $${finalAmount}`);
+
+      // Generar el intento de pago en la pasarela PayRam
+      // ⚠️ Asegúrate de que esta URL sea la correcta de tu API de PayRam
+      // 🎯 Ahora sí, el misil apunta directamente a tu servidor privado
+      const payramResponse = await axios.post(`${process.env.PAYRAM_BASE_URL}/v1/payments/create`, {
+        amount: finalAmount,
+        currency: 'USD',
+        description: description || `Recarga de Billetera en Fansmios`,
+        metadata: {
+          userId: fanId,
+          type: type
+        },
+        redirect_url: 'https://fansmio.com/dashboard' 
+      }, {
+        headers: {
+          'Authorization': `Bearer ${process.env.PAYRAM_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const checkoutUrl = payramResponse.data.checkout_url || payramResponse.data.url;
+
+      if (!checkoutUrl) {
+        throw new Error("PayRam no devolvió una URL de checkout válida.");
+      }
+
+      return res.status(200).json({ 
+        success: true, 
+        checkoutUrl: checkoutUrl 
       });
 
     } else {
@@ -245,7 +273,7 @@ exports.createPaymentIntent = async (req, res) => {
     }
 
   } catch (error) {
-    console.error("Error en Transacción Interna:", error);
+    console.error("Error en Transacción Interna o PayRam:", error);
     res.status(500).json({ error: error.message || 'Error en el motor de pagos interno.' });
   }
 };

@@ -104,6 +104,8 @@ app.use('/api/bookmarks', require('./routes/bookmarkRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/finance', require('./routes/monetizationRoutes'));
 app.use('/api/wallet', require('./routes/walletRoutes')); 
+// 📡 Antena de Webhooks de PayRam
+app.use('/api/webhooks', require('./routes/webhookRoutes'));
 
 // 🔥 NUEVO: CONEXIÓN DIRECTA CON DEPAY (WEB3)
 app.use('/api/depay', require('./routes/depayRouter'));
