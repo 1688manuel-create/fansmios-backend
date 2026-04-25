@@ -4,56 +4,68 @@ const prisma = new PrismaClient();
 exports.handlePayRamWebhook = async (req, res) => {
   try {
     const payload = req.body;
-    console.log("📡 [COVRA RADAR] Procesando pago:", payload.invoice_id);
+    const status = payload.status;
+    
+    // 🎯 CLAVE: Capturamos lo que REALMENTE llegó en dólares
+    const amountReal = parseFloat(payload.filled_amount_in_usd || 0); 
+    const userId = payload.customer_id;
+    const referenceId = payload.invoice_id || payload.reference_id;
 
-    // 1. Respondemos 200 OK de inmediato para que Covra Pay esté tranquilo
+    console.log(`📡 [COVRA RADAR] Recibido: ${status} | Dinero Real: $${amountReal} | User: ${userId}`);
+
+    // 1. Respondemos OK para que la pasarela no se ponga pesada
     res.status(200).send('OK');
 
-    const status = payload.status; 
-    const amount = parseFloat(payload.filled_amount_in_usd || 0); 
-    const userId = payload.customer_id; 
-    // Usamos el invoice_id como huella digital única
-    const referenceId = payload.invoice_id;
+    // 🛡️ TOLERANCIA TOTAL: Aceptamos cualquier estado que signifique "Ya pagó"
+    // Incluimos PARTIALLY_FILLED para esos casos de $0.999
+    const estadosAceptados = ['FILLED', 'OVER_FILLED', 'PARTIALLY_FILLED', 'COMPLETED', 'SUCCESS'];
 
-    if (status === 'FILLED' || status === 'OVER_FILLED' || status === 'COMPLETED') {
+    if (estadosAceptados.includes(status)) {
       
-      // 🛡️ SEGURO ANTIDUPLICADOS: Buscamos si ya procesamos este pago
-      const txExiste = await prisma.transaction.findFirst({
-        where: { payramReceiptId: referenceId }
-      });
-
-      if (txExiste) {
-        console.log("⚠️ Alerta: Este pago ya fue procesado. Evitando duplicidad de saldo.");
+      if (!userId || amountReal <= 0) {
+        console.log("⚠️ Datos insuficientes para procesar saldo.");
         return;
       }
 
-      console.log(`💰 Enlazando $${amount} a la billetera del usuario: ${userId}`);
+      // 🛡️ SEGURO ANTIDUPLICADOS: No queremos sumar dos veces el mismo invoice
+      const txExiste = await prisma.transaction.findFirst({
+        where: { payramReceiptId: referenceId, status: 'COMPLETED' }
+      });
 
-      // 2. OPERACIÓN MAESTRA: Todo o nada
+      if (txExiste) {
+        console.log("⚠️ Este pago ya fue procesado y enlazado. Abortando duplicado.");
+        return;
+      }
+
+      console.log(`💰 Acreditando monto real de $${amountReal} al usuario ${userId}...`);
+
+      // ⚡ OPERACIÓN ATÓMICA: Sumar Saldo + Crear Recibo Histórico
       await prisma.$transaction([
         prisma.wallet.update({
           where: { userId: userId },
-          data: { balance: { increment: amount } }
+          data: { balance: { increment: amountReal } }
         }),
         prisma.transaction.create({
           data: {
-            amount: amount,
-            netAmount: amount,
+            amount: amountReal,
+            netAmount: amountReal,
             platformFee: 0, 
             type: 'CREDIT_TOPUP',
-            status: 'COMPLETED',
+            status: 'COMPLETED', // 👈 Forzamos a COMPLETADO en FansMio para que sea verde
             senderId: userId, 
             receiverId: userId,
-            description: `Recarga exitosa vía Covra Pay`,
-            payramReceiptId: referenceId // 👈 Esto es lo que crea el "enlace"
+            description: `Recarga via Covra Pay (Monto Recibido: $${amountReal})`,
+            payramReceiptId: referenceId
           }
         })
       ]);
 
-      console.log(`✅ ¡OPERACIÓN TRIUNFAL! Saldo enlazado y visible en el historial.`);
+      console.log(`✅ ¡OPERACIÓN EXITOSA! $${amountReal} inyectados y recibo generado.`);
+    } else {
+      console.log(`⏳ Pago aún no listo. Status actual: ${status}`);
     }
 
   } catch (error) {
-    console.error("❌ Error en el radar de Webhooks:", error);
+    console.error("❌ Error crítico en el enlace del Webhook:", error);
   }
 };
