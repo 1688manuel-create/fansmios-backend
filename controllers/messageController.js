@@ -1,7 +1,5 @@
-// backend/controllers/messageController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-// 🔥 INYECTAMOS CLOUDINARY Y FS PARA BORRAR LA BASURA LOCAL
 const { cloudinary } = require('../utils/cloudinaryConfig');
 const fs = require('fs');
 
@@ -11,7 +9,7 @@ try {
 } catch (e) {}
 
 // ==========================================
-// 0. OBTENER LISTA DE CONVERSACIONES
+// 0. OBTENER LISTA DE CONVERSACIONES (Con fotos)
 // ==========================================
 exports.getConversations = async (req, res) => {
   try {
@@ -19,8 +17,9 @@ exports.getConversations = async (req, res) => {
     const conversations = await prisma.conversation.findMany({
       where: { OR: [ { creatorId: userId }, { fanId: userId } ] },
       include: {
-        creator: { select: { id: true, username: true, email: true } },
-        fan: { select: { id: true, username: true, email: true } },
+        // 🔥 CORRECCIÓN: Ahora traemos creatorProfile para AMBOS (Creador y Fan)
+        creator: { select: { id: true, username: true, email: true, creatorProfile: { select: { profileImage: true } } } },
+        fan: { select: { id: true, username: true, email: true, creatorProfile: { select: { profileImage: true } } } },
         messages: { orderBy: { createdAt: 'desc' }, take: 1 }
       },
       orderBy: { updatedAt: 'desc' }
@@ -28,7 +27,7 @@ exports.getConversations = async (req, res) => {
 
     const formattedChats = conversations.map(chat => {
       const otherUser = chat.creatorId === userId ? chat.fan : chat.creator;
-      const lastMessage = chat.messages;
+      const lastMessage = chat.messages ? chat.messages : null; // Corrección: Extraer el primer elemento del array
       const isUnread = lastMessage ? (lastMessage.receiverId === userId && !lastMessage.isRead) : false;
 
       return {
@@ -47,27 +46,25 @@ exports.getConversations = async (req, res) => {
 };
 
 // ==========================================
-// 🔥 0.1 [MODO DIOS] OBTENER TODAS LAS CONVERSACIONES GLOBALES
+// 0.1 [MODO DIOS] OBTENER TODAS LAS CONVERSACIONES GLOBALES
 // ==========================================
 exports.getAllConversationsAdmin = async (req, res) => {
   try {
-    // Verificamos estricta seguridad
     if (req.user.role !== 'ADMIN') {
       return res.status(403).json({ error: "Acceso denegado. Requiere Nivel de Administrador." });
     }
 
-    // Extraemos ABSOLUTAMENTE TODOS los chats de la plataforma
     const allConversations = await prisma.conversation.findMany({
       include: {
-        creator: { select: { id: true, username: true } },
-        fan: { select: { id: true, username: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1 } // Solo el último mensaje para la previsualización
+        creator: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } } } },
+        fan: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } } } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 }
       },
       orderBy: { updatedAt: 'desc' }
     });
 
     const formattedAdminChats = allConversations.map(chat => {
-      const lastMessage = chat.messages;
+      const lastMessage = chat.messages ? chat.messages : null;
       return {
         id: chat.id,
         creator: chat.creator,
@@ -98,7 +95,7 @@ exports.getUnreadCount = async (req, res) => {
 };
 
 // ==========================================
-// 1. OBTENER HISTORIAL DE UNA CONVERSACIÓN
+// 1. OBTENER HISTORIAL DE UNA CONVERSACIÓN (Inyecta fotos a cada burbuja)
 // ==========================================
 exports.getConversation = async (req, res) => {
   try {
@@ -116,18 +113,23 @@ exports.getConversation = async (req, res) => {
     const messages = await prisma.message.findMany({
       where: { conversationId: conversationId },
       orderBy: { createdAt: 'asc' },
-      include: { purchases: { where: { fanId: userId } } }
+      include: { 
+        purchases: { where: { fanId: userId } },
+        // 🔥 CORRECCIÓN: Traemos la foto individual del remitente para cada mensaje
+        sender: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } } } }
+      }
     });
 
     const secureMessages = messages.map(msg => {
       const isSender = msg.senderId === userId;
       const isUnlocked = msg.purchases.length > 0 || userRole === 'ADMIN'; 
+      // 🔥 Extraemos la foto y se la inyectamos a la respuesta
+      const profileImage = msg.sender?.creatorProfile?.profileImage || null;
 
       if (!msg.isPPV || isSender || isUnlocked) {
-        return { ...msg, senderId: isSender ? 'me' : msg.senderId, isUnlocked: true };
+        return { ...msg, senderId: isSender ? 'me' : msg.senderId, isUnlocked: true, profileImage };
       } else {
-        // Mantenemos el mediaUrl intacto para que el Frontend pueda aplicarle el filtro borroso
-        return { ...msg, senderId: msg.senderId, mediaUrl: msg.mediaUrl, isUnlocked: false };
+        return { ...msg, senderId: msg.senderId, mediaUrl: msg.mediaUrl, isUnlocked: false, profileImage };
       }
     });
 
@@ -138,7 +140,7 @@ exports.getConversation = async (req, res) => {
 };
 
 // ==========================================
-// 2. ENVIAR MENSAJE E INYECTAR NOTIFICACIÓN (CON CLOUDINARY ☁️)
+// 2. ENVIAR MENSAJE E INYECTAR NOTIFICACIÓN
 // ==========================================
 exports.sendMessage = async (req, res) => {
   try {
@@ -147,20 +149,14 @@ exports.sendMessage = async (req, res) => {
     
     if (senderId === receiverId) return res.status(400).json({ error: 'No puedes enviarte mensajes a ti mismo.' });
 
-    // 🔥 NUEVA LÓGICA DE CLOUDINARY PARA ELIMINAR LA DEPENDENCIA LOCAL
     let mediaUrl = null;
     if (req.file) {
       try {
-        // 1. Subimos el archivo a la nube (resource_type 'auto' acepta videos, audios y fotos)
         const result = await cloudinary.uploader.upload(req.file.path, {
           folder: "fansmio_messages",
           resource_type: "auto" 
         });
-        
-        // 2. Guardamos la URL segura de la nube
         mediaUrl = result.secure_url;
-        
-        // 3. Borramos el archivo local temporal para no llenar el disco duro de Coolify
         if (fs.existsSync(req.file.path)) {
           fs.unlinkSync(req.file.path);
         }
@@ -201,7 +197,7 @@ exports.sendMessage = async (req, res) => {
         conversationId: activeConvId,
         senderId, receiverId, 
         content: content || null, 
-        mediaUrl, // 🔥 Ahora guarda el link indestructible de Cloudinary
+        mediaUrl,
         isPPV: isPpvBool, 
         price: isPpvBool ? parseFloat(price) : 0.0
       }
@@ -232,11 +228,13 @@ exports.sendMessage = async (req, res) => {
       }
     } catch (e) {}
 
-    // 🔥 CORRECCIÓN: Le devolvemos el chatId (activeConvId) al frontend para que sepa dónde está hablando
+    // Obtenemos la foto del usuario que acaba de enviar el mensaje para devolvérsela al Frontend de inmediato
+    const senderProfile = await prisma.creatorProfile.findUnique({ where: { userId: senderId } });
+
     res.status(201).json({ 
       message: 'Mensaje enviado ✉️', 
       chatId: activeConvId, 
-      messageData: { ...newMessage, senderId: 'me', isUnlocked: true } 
+      messageData: { ...newMessage, senderId: 'me', isUnlocked: true, profileImage: senderProfile?.profileImage || null } 
     });
   } catch (error) {
     console.error("Error en sendMessage:", error);
@@ -299,15 +297,13 @@ exports.deleteMessage = async (req, res) => {
 };
 
 // ==========================================
-// 7. BROADCAST (MASIVO) - MOTOR REAL ACTIVADO 🚀
+// 7. BROADCAST (MASIVO)
 // ==========================================
 exports.sendBroadcast = async (req, res) => {
   try {
-    // 1. Identificamos al Creador que está disparando el Broadcast
     const creatorId = req.user?.userId || req.user?.id;
     const { content, price } = req.body;
     
-    // 2. Procesamos el archivo multimedia (Si hay uno)
     let mediaUrl = null;
     if (req.file) {
       try {
@@ -326,8 +322,6 @@ exports.sendBroadcast = async (req, res) => {
       }
     }
 
-    // 3. BUSCAMOS A LOS FANS (El Radar)
-    // Buscamos a todos los usuarios que sigan a este creador
     const followers = await prisma.follow.findMany({
       where: { followingId: creatorId },
       select: { followerId: true }
@@ -337,146 +331,83 @@ exports.sendBroadcast = async (req, res) => {
       return res.status(400).json({ error: "No tienes fans activos para enviar este mensaje." });
     }
 
-    // 4. PREPARAMOS LA CARGA ÚTIL
     const isPpvBool = !!price && parseFloat(price) > 0;
     const numPrice = isPpvBool ? parseFloat(price) : 0.0;
-    
-    // Extraemos la lista de IDs de los fans
     const fanIds = followers.map(f => f.followerId);
 
-    // 5. ASEGURAMOS QUE EXISTAN LAS CONVERSACIONES
-    // Para enviar un mensaje, necesitamos que exista una 'Conversation' entre el creador y cada fan
-    // Buscamos las conversaciones que ya existen
     const existingConvs = await prisma.conversation.findMany({
-      where: {
-        creatorId: creatorId,
-        fanId: { in: fanIds }
-      },
+      where: { creatorId: creatorId, fanId: { in: fanIds } },
       select: { id: true, fanId: true }
     });
 
     const existingFanIds = existingConvs.map(c => c.fanId);
-    
-    // Filtramos los fans que NO tienen conversación aún
     const fansWithoutConv = fanIds.filter(id => !existingFanIds.includes(id));
 
-    // Creamos las conversaciones faltantes masivamente
     if (fansWithoutConv.length > 0) {
       const convsToCreate = fansWithoutConv.map(fanId => ({
-        creatorId: creatorId,
-        fanId: fanId,
-        updatedAt: new Date()
+        creatorId: creatorId, fanId: fanId, updatedAt: new Date()
       }));
       await prisma.conversation.createMany({ data: convsToCreate });
     }
 
-    // Volvemos a traer todas las conversaciones actualizadas para tener todos los IDs
     const allConvsForBroadcast = await prisma.conversation.findMany({
       where: { creatorId: creatorId, fanId: { in: fanIds } },
       select: { id: true, fanId: true }
     });
 
-    // 6. LANZAMOS LA BOMBA (Inyección Masiva de Mensajes)
     const messagesToInsert = allConvsForBroadcast.map(conv => ({
-      conversationId: conv.id,
-      senderId: creatorId,
-      receiverId: conv.fanId,
-      content: content || null,
-      mediaUrl: mediaUrl,
-      isPPV: isPpvBool,
-      price: numPrice
+      conversationId: conv.id, senderId: creatorId, receiverId: conv.fanId, content: content || null, mediaUrl: mediaUrl, isPPV: isPpvBool, price: numPrice
     }));
 
-    // createMany es super rápido, inserta miles de registros de golpe
-    await prisma.message.createMany({
-      data: messagesToInsert
-    });
+    await prisma.message.createMany({ data: messagesToInsert });
 
-    // Actualizamos la fecha de todas las conversaciones afectadas para que suban arriba en el chat
     const convIds = allConvsForBroadcast.map(c => c.id);
     await prisma.conversation.updateMany({
       where: { id: { in: convIds } },
       data: { updatedAt: new Date() }
     });
 
-    // 7. ENVIAMOS NOTIFICACIONES
     const creatorInfo = await prisma.user.findUnique({ where: { id: creatorId }, select: { username: true }});
     const notificationsToInsert = fanIds.map(fanId => ({
-      userId: fanId,
-      type: 'MESSAGE',
-      content: `Mensaje masivo de @${creatorInfo?.username || 'Creador'} 🚀`,
-      link: '/dashboard/messages'
+      userId: fanId, type: 'MESSAGE', content: `Mensaje masivo de @${creatorInfo?.username || 'Creador'} 🚀`, link: '/dashboard/messages'
     }));
 
-    await prisma.notification.createMany({
-      data: notificationsToInsert
-    });
+    await prisma.notification.createMany({ data: notificationsToInsert });
 
-    // 8. ALERTAMOS AL RADAR EN TIEMPO REAL (WebSockets)
     try {
       if (socketHandler && socketHandler.getIO) {
         const io = socketHandler.getIO();
-        // Emitimos un aviso general. Cada fan conectado verá que le llegó algo.
         fanIds.forEach(fanId => {
            io.to(fanId).emit('alertaMasiva', { from: creatorInfo?.username });
         });
       }
     } catch (e) { console.log("Socket no disponible para broadcast"); }
 
-    // 9. REPORTE DE MISIÓN
-    res.status(200).json({ 
-      success: true, 
-      message: `¡Bomba lanzada 🚀! Mensaje entregado a ${fanIds.length} fans exitosamente.` 
-    });
-
+    res.status(200).json({ success: true, message: `¡Bomba lanzada 🚀! Mensaje entregado a ${fanIds.length} fans exitosamente.` });
   } catch (error) {
     console.error("🚨 Error crítico en Broadcast:", error);
     res.status(500).json({ error: 'Fallo al procesar el envío masivo.' });
   }
 };
 
-// 🔥 ANIQUILAR CONVERSACIÓN COMPLETA (VERSIÓN BLINDADA Y MULTI-DETECCIÓN)
+// 🔥 ANIQUILAR CONVERSACIÓN COMPLETA
 exports.deleteConversation = async (req, res) => {
   try {
     const { conversationId } = req.params;
-
-    // 🎯 EL TRUCO TÁCTICO: Capturamos el ID y el Rol de todas las formas posibles que usa Node.js
     const userId = req.user?.id || req.userId || req.user?.userId || req.user?._id;
     const userRole = req.user?.role || req.role;
 
-    // 1. Buscamos la conversación
-    const conversation = await prisma.conversation.findUnique({
-      where: { id: conversationId }
-    });
+    const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
+    if (!conversation) return res.status(404).json({ error: 'La conversación ya no existe.' });
 
-    if (!conversation) {
-      return res.status(404).json({ error: 'La conversación ya no existe.' });
-    }
-
-    // 2. Seguridad: Verificamos si es el dueño o un Admin
     const isFan = conversation.fanId === userId;
     const isCreator = conversation.creatorId === userId;
     const isAdmin = userRole === 'ADMIN';
 
-    if (!isFan && !isCreator && !isAdmin) {
-      // ⚠️ Si vuelve a fallar, esto dejará una huella exacta en la consola de Coolify
-      console.log("🚨 Bloqueo de seguridad detallado:", { 
-        dbFanId: conversation.fanId, 
-        dbCreatorId: conversation.creatorId, 
-        tuIdDetectado: userId 
-      });
-      return res.status(403).json({ error: 'No tienes permiso para destruir este chat.' });
-    }
+    if (!isFan && !isCreator && !isAdmin) return res.status(403).json({ error: 'No tienes permiso para destruir este chat.' });
 
-    // 3. Borramos todos los mensajes de esa conversación
-    await prisma.message.deleteMany({
-      where: { conversationId: conversationId }
-    });
-
-    // 4. Borramos la conversación vacía
-    await prisma.conversation.delete({
-      where: { id: conversationId }
-    });
+    await prisma.message.deleteMany({ where: { conversationId: conversationId } });
+    await prisma.conversation.delete({ where: { id: conversationId } });
 
     res.status(200).json({ message: '💥 Chat y mensajes aniquilados con éxito.' });
   } catch (error) {
