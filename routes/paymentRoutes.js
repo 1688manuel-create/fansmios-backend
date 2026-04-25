@@ -5,14 +5,14 @@ const paymentController = require('../controllers/paymentController');
 const { verifyToken } = require('../middlewares/authMiddleware');
 
 // ==========================================
-// 💳 NÚCLEO FINANCIERO FANSMIOS (Motor Interno Covra)
+// 💳 NÚCLEO FINANCIERO FANSMIOS (Motor Híbrido Covra + PayRam)
 // ==========================================
 
 /**
- * Generador Maestro de Órdenes Internas (Suscripciones, PPV, Tips, Bundles)
- * Esta es la ruta central que dispara el motor interno de Fansmios.
- * Procesa los pagos y transfiere el saldo entre usuarios de forma instantánea.
- * (🔥 Las recargas de dinero externo ahora viajan vía Web3 por /api/depay)
+ * 🚀 Generador Maestro de Órdenes (Suscripciones, PPV, Tips, Bundles y Recargas)
+ * * Esta es la ruta central del imperio:
+ * - Si es una RECARGA ('CREDIT_TOPUP'): Genera un link externo hacia Covra Pay / PayRam.
+ * - Si es un PAGO INTERNO (Sub, PPV): Procesa el movimiento atómico de saldo entre bóvedas.
  */
 router.post('/create-intent', verifyToken, paymentController.createPaymentIntent);
 
