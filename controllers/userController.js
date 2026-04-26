@@ -394,34 +394,71 @@ exports.savePushToken = async (req, res) => {
 // ==========================================
 exports.getTrendingCreators = async (req, res) => {
   try {
-    const trendingCreators = await prisma.user.findMany({
+    // 🔥 BUSCAMOS CREADORES CON PAQUETES ACTIVOS (BASIC o PRO)
+    const promotedCreators = await prisma.promotion.findMany({
       where: {
-        role: { in: ['CREATOR', 'ADMIN'] }
+        active: true,
+        expiresAt: { gt: new Date() }, // Que no haya expirado
+        package: { in: ['BASIC', 'PRO'] } // El paquete GOD sale arriba, estos salen en el lateral
       },
-      take: 5, 
-      orderBy: {
-        createdAt: 'desc' 
-      },
-      select: {
-        id: true,
-        username: true,
-        name: true,
-        role: true,
-        creatorProfile: {
+      include: {
+        creator: {
           select: {
-            profileImage: true
+            id: true,
+            username: true,
+            name: true,
+            role: true,
+            creatorProfile: {
+              select: {
+                profileImage: true
+              }
+            }
           }
         }
-      }
+      },
+      orderBy: {
+        package: 'desc' // PRO primero, luego BASIC
+      },
+      take: 5 // Top 5 de los que pagaron
     });
 
-    const formattedTrending = trendingCreators.map(creator => ({
-      id: creator.id,
-      username: creator.username,
-      name: creator.name || creator.username, 
+    // Si hay menos de 5 con promoción, rellenamos con creadores recientes para que no se vea vacío
+    let formattedTrending = promotedCreators.map(promo => ({
+      id: promo.creator.id,
+      username: promo.creator.username,
+      name: promo.creator.name || promo.creator.username, 
       isOnline: Math.random() > 0.5, 
-      creatorProfile: creator.creatorProfile
+      creatorProfile: promo.creator.creatorProfile,
+      isPromoted: true // Bandera táctica para el frontend
     }));
+
+    if (formattedTrending.length < 5) {
+      const excludeIds = formattedTrending.map(c => c.id);
+      
+      const fillerCreators = await prisma.user.findMany({
+        where: {
+          role: { in: ['CREATOR', 'ADMIN'] },
+          id: { notIn: excludeIds }
+        },
+        take: 5 - formattedTrending.length,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true, username: true, name: true, role: true,
+          creatorProfile: { select: { profileImage: true } }
+        }
+      });
+
+      const formattedFillers = fillerCreators.map(creator => ({
+        id: creator.id,
+        username: creator.username,
+        name: creator.name || creator.username,
+        isOnline: Math.random() > 0.5,
+        creatorProfile: creator.creatorProfile,
+        isPromoted: false
+      }));
+
+      formattedTrending = [...formattedTrending, ...formattedFillers];
+    }
 
     res.status(200).json({ trending: formattedTrending });
   } catch (error) {
