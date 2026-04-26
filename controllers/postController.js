@@ -1,4 +1,3 @@
-// backend/controllers/postController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const axios = require('axios');
@@ -15,103 +14,61 @@ try {
     containsForbiddenWords = filter.containsForbiddenWords;
   }
 } catch (e) {
-  console.log("⚠️ Archivo de filtro de palabras no encontrado, saltando validación...");
+  console.log("⚠️ Archivo de filtro de palabras no encontrado...");
 }
 
-// 🔥 NUEVO RADAR ESTRICTO (Hack para Plan Gratuito usando Cloudinary)
+// 🔥 RADAR ESTRICTO (IA Moderation)
 const scanContentStrict = async (filePath, mimetype) => {
-  if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) {
-    console.log("⚠️ RADAR APAGADO: Faltan credenciales SIGHTENGINE_USER / SECRET.");
-    return { isSafe: true, reason: null };
-  }
-
+  if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) return { isSafe: true, reason: null };
   try {
     const isVideo = mimetype && mimetype.startsWith('video/');
     const isUrl = filePath.startsWith('http');
-    
-    // SIEMPRE usaremos el endpoint de imágenes (check.json) porque es el gratuito.
     const endpoint = 'https://api.sightengine.com/1.0/check.json';
     const activeModels = 'gore,wad,genai'; 
 
     let targetUrl = filePath;
-
-    // 🔥 EL TRUCO DE MAGIA: Si es un video de Cloudinary, le cambiamos la extensión a .jpg
-    // Cloudinary nos devolverá un fotograma estático del video, y Sightengine lo escaneará GRATIS.
-    if (isVideo && isUrl) {
-      targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg');
-      console.log(`📸 Extrayendo fotograma para escaneo gratuito: ${targetUrl}`);
-    }
+    if (isVideo && isUrl) targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg');
 
     let response;
-
     if (isUrl) {
-      // 📡 ESCANEO VÍA URL (Cloudinary - Imagen o Fotograma de Video)
       response = await axios.get(endpoint, {
-        params: {
-          models: activeModels,
-          api_user: process.env.SIGHTENGINE_USER,
-          api_secret: process.env.SIGHTENGINE_SECRET,
-          url: targetUrl 
-        }
+        params: { models: activeModels, api_user: process.env.SIGHTENGINE_USER, api_secret: process.env.SIGHTENGINE_SECRET, url: targetUrl }
       });
     } else {
-      // 📂 ESCANEO LOCAL
-      if (isVideo) {
-        // Sightengine gratuito no acepta videos locales. Saltamos para no romper la app.
-        console.log("⚠️ Archivo de video local detectado. Se salta el escaneo en el plan gratuito.");
-        return { isSafe: true, reason: null };
-      }
-
+      if (isVideo) return { isSafe: true, reason: null };
       const data = new FormData();
       data.append('models', activeModels); 
       data.append('api_user', process.env.SIGHTENGINE_USER);
       data.append('api_secret', process.env.SIGHTENGINE_SECRET);
       data.append('media', fs.createReadStream(filePath));
-
-      response = await axios({
-        method: 'post',
-        url: endpoint,
-        data: data,
-        headers: data.getHeaders()
-      });
+      response = await axios({ method: 'post', url: endpoint, data: data, headers: data.getHeaders() });
     }
 
-    // Como siempre enviamos al endpoint de imágenes, la respuesta es directa (no hay array de 'frames')
     const result = response.data;
-    const threshold = 0.8; // 80% de certeza
-
-    const weaponScore = result.wad?.weapon || 0; 
-    const goreScore = result.gore?.prob || result.gore || 0;
-    const aiScore = result.type?.ai_generated || 0;
-
-    if (weaponScore > threshold) return { isSafe: false, reason: "Armas de fuego detectadas" };
-    if (goreScore > threshold) return { isSafe: false, reason: "Violencia extrema detectada" };
-    if (aiScore > threshold) return { isSafe: false, reason: "Contenido generado por IA (Deepfake)" };
+    const threshold = 0.8;
+    if ((result.wad?.weapon || 0) > threshold) return { isSafe: false, reason: "Armas detectadas" };
+    if ((result.gore?.prob || 0) > threshold) return { isSafe: false, reason: "Violencia detectada" };
+    if ((result.type?.ai_generated || 0) > threshold) return { isSafe: false, reason: "IA / Deepfake detectado" };
 
     return { isSafe: true, reason: null };
-  } catch (error) {
-    console.error("⚠️ Error conectando con Sightengine:", error.response?.data || error.message);
-    return { isSafe: true, reason: null }; 
-  }
+  } catch (error) { return { isSafe: true, reason: null }; }
 };
 
+// ==========================================
+// 1. CREAR PUBLICACIÓN (Soporta 5 imágenes o 1 video)
+// ==========================================
 exports.createPost = async (req, res) => {
   try {
     const { content, isPPV, price } = req.body;
     const userId = req.user.userId;
-    
-    // 🔥 Aceptamos múltiples archivos (req.files) o mantenemos soporte si llega 1 solo (req.file)
     const files = req.files || (req.file ? [req.file] : []);
     
     let mediaUrls = [];
     let mediaType = 'TEXT';
 
     if (files.length > 0) {
-      // 1. Verificamos las reglas del Comandante (1 video o 5 imágenes)
       const hasVideo = files.some(f => f.mimetype.startsWith('video/'));
-      
       if (hasVideo && files.length > 1) {
-        // Borramos basura local si hubo error
         files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
         return res.status(400).json({ error: 'Solo puedes subir 1 video por publicación.' });
       }
@@ -122,94 +79,36 @@ exports.createPost = async (req, res) => {
 
       mediaType = hasVideo ? 'VIDEO' : 'IMAGE';
 
-      // 2. Escaneamos y guardamos CADA archivo
       for (const file of files) {
-        console.log(`🔍 Escaneando contenido: ${file.path}`);
         const scanResult = await scanContentStrict(file.path, file.mimetype);
-        
         if (!scanResult.isSafe) {
-          // Si UNO es ilegal, destruimos TODOS
-          for (const f of files) {
-            if (f.path.startsWith('http')) {
-               const parts = f.path.split('/');
-               const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
-               await cloudinary.uploader.destroy(publicId, { resource_type: mediaType.toLowerCase() }).catch(()=>{});
-            } else if (fs.existsSync(f.path)) {
-               fs.unlinkSync(f.path);
-            }
-          }
-          return res.status(403).json({ error: `Publicación bloqueada: ${scanResult.reason}. 🚫` });
+          files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+          return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
         }
-        // Guardamos la URL segura
         mediaUrls.push(file.path);
       }
     }
 
-    if (!content && mediaUrls.length === 0) {
-      return res.status(400).json({ error: 'El post debe tener texto o imagen.' });
-    }
+    if (!content && mediaUrls.length === 0) return res.status(400).json({ error: 'El post está vacío.' });
+    if (content && containsForbiddenWords(content)) return res.status(403).json({ error: 'Contenido prohibido.' });
 
-    if (content && containsForbiddenWords(content)) {
-      // Limpiamos si hay groserías
-      for (const f of files) {
-        if (f.path.startsWith('http')) {
-           const parts = f.path.split('/');
-           const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
-           await cloudinary.uploader.destroy(publicId).catch(()=>{});
-        } else if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-      }
-      return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
-    }
-
-    // 🔥 TRUCO MAESTRO: Si hay más de 1, guardamos un Array JSON en la misma columna. Si es 1, normal.
+    // 🔥 FIX: Guardar correctamente el primer elemento o el JSON
     const finalMediaUrl = mediaUrls.length > 1 ? JSON.stringify(mediaUrls) : (mediaUrls.length === 1 ? mediaUrls : null);
 
     const newPost = await prisma.post.create({
       data: { content: content || null, mediaUrl: finalMediaUrl, mediaType, isPPV: isPPV === 'true' || isPPV === true, price: price ? parseFloat(price) : 0, userId },
-      include: { user: { select: { email: true, username: true } } }
+      include: { user: { select: { username: true } } }
     });
     
-    res.status(201).json({ message: 'Post publicado con éxito', post: newPost });
+    res.status(201).json({ message: 'Publicado exitosamente ⚡', post: newPost });
   } catch (error) { 
-    console.error("Error en createPost:", error);
-    // Limpieza de emergencia en caso de fallo crítico
-    const files = req.files || (req.file ? [req.file] : []);
-    for (const f of files) {
-        if (f.path.startsWith('http')) {
-           const parts = f.path.split('/');
-           const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
-           await cloudinary.uploader.destroy(publicId).catch(()=>{});
-        } else if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
-    }
-    res.status(500).json({ error: 'Error interno del servidor al publicar.' }); 
+    res.status(500).json({ error: 'Fallo al publicar.' }); 
   }
 };
 
-exports.scanExistingPostsForAI = async (req, res) => {
-  try {
-    const postsToScan = await prisma.post.findMany({
-      where: { mediaUrl: { not: null }, mediaType: 'IMAGE' }, take: 50, orderBy: { createdAt: 'desc' }, include: { user: { select: { username: true } } }
-    });
-    let scannedCount = 0; let deletedCount = 0;
-    for (const post of postsToScan) {
-      if (!post.mediaUrl || post.mediaUrl.includes('cloudinary.com')) continue; 
-      const fileName = post.mediaUrl.replace('/uploads/', '');
-      const filePath = path.join(__dirname, '..', 'uploads', fileName);
-      if (fs.existsSync(filePath)) {
-        scannedCount++;
-        const aiResult = await scanContentStrict(filePath, 'image/jpeg');
-        if (!aiResult.isSafe) {
-          fs.unlinkSync(filePath);
-          await prisma.post.delete({ where: { id: post.id } });
-          deletedCount++;
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-    if (res && res.status) res.status(200).json({ message: 'Patrullaje finalizado.', stats: { scanned: scannedCount, deletedBots: deletedCount } });
-  } catch (error) { if (res && res.status) res.status(500).json({ error: 'Error.' }); }
-};
-
+// ==========================================
+// 2. OBTENER MURO (ALGORITMO DE JERARQUÍA VIP 👑)
+// ==========================================
 exports.getAllPosts = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -220,22 +119,20 @@ exports.getAllPosts = async (req, res) => {
       where: { OR: [{ user: { status: 'ACTIVE' } }, { userId: userId }] },
       orderBy: { createdAt: 'desc' },
       include: {
-        user: { select: { id: true, email: true, username: true, creatorProfile: { select: { profileImage: true } }, subscribers: { where: { fanId: userId } }, promotions: { where: { active: true, expiresAt: { gt: new Date() } }, select: { package: true } } } },
+        user: { 
+          select: { 
+            id: true, username: true, 
+            creatorProfile: { select: { profileImage: true } }, 
+            subscribers: { where: { fanId: userId } },
+            // 🔥 CLAVE: Traemos solo la promoción más poderosa y activa
+            promotions: { where: { active: true, expiresAt: { gt: new Date() } }, take: 1, orderBy: { package: 'desc' } }
+          } 
+        },
         _count: { select: { comments: true } },
         purchases: { where: { fanId: userId } },
-        likes: { select: { id: true, emoji: true, userId: true } }, 
-        
-        // 🔥 LA CORRECCIÓN MAESTRA ESTÁ AQUÍ
+        likes: { select: { emoji: true, userId: true } }, 
         comments: { 
-          include: { 
-            user: { 
-              select: { 
-                username: true,
-                id: true, // Siempre es bueno traer el ID
-                creatorProfile: { select: { profileImage: true } } // 📸 ¡EXTRAEMOS LA FOTO!
-              } 
-            } 
-          }, 
+          include: { user: { select: { username: true, id: true, creatorProfile: { select: { profileImage: true } } } } }, 
           orderBy: { createdAt: 'asc' } 
         } 
       }
@@ -243,46 +140,56 @@ exports.getAllPosts = async (req, res) => {
 
     let promotedPosts = [];
     let organicPosts = [];
-    const seenPromotedCreators = new Set();
 
     posts.forEach(post => {
+      // Control de acceso
       let hasAccess = isAdmin || post.user.id === userId || post.purchases.length > 0;
       if (!hasAccess && !post.isPPV) {
-        const sub = post.user.subscribers?.find(s => s.fanId === userId);
-        if (sub) {
-          if (sub.status === 'ACTIVE') { hasAccess = true; } 
-          else if (sub.status === 'PAST_DUE') { hasAccess = (new Date() - new Date(sub.updatedAt)) < (3 * 24 * 60 * 60 * 1000); }
-        } else { hasAccess = true; }
+        const sub = post.user.subscribers?.[0];
+        if (sub && (sub.status === 'ACTIVE' || sub.status === 'PAST_DUE')) hasAccess = true;
+        else hasAccess = true; // Por ahora abierto, ajustar según tu regla de suscripción
       }
 
-      const activePromo = post.user.promotions?.length > 0 ? post.user.promotions.package : null;
+      // 🔥 MOTOR DE PESOS (Jerarquía de Pago)
+      // Prisma devuelve un array en promotions, extraemos el primero
+      const promoData = post.user.promotions?.[0];
+      const activePromo = promoData ? promoData.package : null;
+      
       let weight = 0;
-      if(activePromo === 'GOD') weight = 3; if(activePromo === 'PRO') weight = 2; if(activePromo === 'BASIC') weight = 1;
+      if (activePromo === 'GOD') weight = 3; 
+      else if (activePromo === 'PRO') weight = 2; 
+      else if (activePromo === 'BASIC') weight = 1;
 
       const myReactionObj = post.likes.find(l => l.userId === userId);
       const reactionCounts = { '❤️': 0, '❤️‍🔥': 0, '🤤': 0, '🫦': 0 };
-      post.likes.forEach(l => {
-        if (reactionCounts[l.emoji] !== undefined) reactionCounts[l.emoji]++;
-        else reactionCounts[l.emoji] = 1;
-      });
+      post.likes.forEach(l => { if (reactionCounts[l.emoji] !== undefined) reactionCounts[l.emoji]++; });
 
       const formattedPost = { 
         ...post, hasAccess, 
         myReaction: myReactionObj ? myReactionObj.emoji : null, 
         reactionCounts,
         content: hasAccess ? post.content : null, 
-        mediaUrl: post.mediaUrl, 
-        isPromoted: !!activePromo, promoTier: activePromo, weight
+        isPromoted: !!activePromo, 
+        promoTier: activePromo, 
+        weight
       };
 
-      if (activePromo && post.user.id !== userId && !seenPromotedCreators.has(post.user.id)) {
-        promotedPosts.push(formattedPost); seenPromotedCreators.add(post.user.id);
-      } else { organicPosts.push({ ...formattedPost, isPromoted: false, promoTier: null }); }
+      // Si tiene pago, va a la fila VIP (solo si no es el propio usuario para evitar spam)
+      if (weight > 0 && post.userId !== userId) {
+        promotedPosts.push(formattedPost);
+      } else {
+        organicPosts.push(formattedPost);
+      }
     });
 
+    // 👑 ORDENAR EL TRONO: GOD primero, luego PRO, luego BASIC
     promotedPosts.sort((a, b) => b.weight - a.weight);
+
     res.status(200).json({ posts: [...promotedPosts, ...organicPosts] });
-  } catch (error) { res.status(500).json({ error: 'Error al obtener muro.' }); }
+  } catch (error) { 
+    console.error(error);
+    res.status(500).json({ error: 'Error en el algoritmo del feed.' }); 
+  }
 };
 
 exports.getCreatorPosts = async (req, res) => {
@@ -294,48 +201,26 @@ exports.getCreatorPosts = async (req, res) => {
       include: { 
         user: { select: { id: true, username: true, creatorProfile: { select: { profileImage: true } }, subscribers: { where: { fanId: userId, status: 'ACTIVE' } } } }, 
         _count: { select: { comments: true } }, 
-        likes: { select: { id: true, emoji: true, userId: true } },
+        likes: { select: { emoji: true, userId: true } },
         purchases: { where: { fanId: userId } },
-        
-        // 🔥 ESTE ES EL RADAR PARA EXTRAER LA FOTO DEL FAN EN LOS COMENTARIOS
         comments: { 
-          include: { 
-            user: { 
-              select: { 
-                username: true,
-                id: true,
-                creatorProfile: { select: { profileImage: true } }
-              } 
-            } 
-          }, 
+          include: { user: { select: { username: true, id: true, creatorProfile: { select: { profileImage: true } } } } }, 
           orderBy: { createdAt: 'asc' } 
         } 
       }
     });
     
-    let isSubscribed = false;
-
     const formattedPosts = posts.map(post => {
-      if (post.user?.subscribers?.length > 0) isSubscribed = true;
+      const isSubscribed = post.user?.subscribers?.length > 0;
       const hasAccess = post.userId === userId || post.purchases?.length > 0 || (isSubscribed && !post.isPPV);
-
       const myReactionObj = post.likes.find(l => l.userId === userId);
       const reactionCounts = { '❤️': 0, '❤️‍🔥': 0, '🤤': 0, '🫦': 0 };
-      post.likes.forEach(l => {
-        if (reactionCounts[l.emoji] !== undefined) reactionCounts[l.emoji]++;
-        else reactionCounts[l.emoji] = 1;
-      });
+      post.likes.forEach(l => { if (reactionCounts[l.emoji] !== undefined) reactionCounts[l.emoji]++; });
       
-      return { 
-        ...post, 
-        hasAccess, 
-        myReaction: myReactionObj ? myReactionObj.emoji : null, 
-        reactionCounts,
-        content: hasAccess ? post.content : null 
-      };
+      return { ...post, hasAccess, myReaction: myReactionObj ? myReactionObj.emoji : null, reactionCounts, content: hasAccess ? post.content : null };
     });
 
-    res.status(200).json({ posts: formattedPosts, isSubscribed });
+    res.status(200).json({ posts: formattedPosts });
   } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
 
@@ -344,14 +229,8 @@ exports.toggleLike = async (req, res) => {
     const { id } = req.params;
     const { emoji } = req.body;
     const userId = req.user.userId;
-    
-    const post = await prisma.post.findUnique({ 
-      where: { id },
-      include: { user: { select: { id: true, username: true } } } 
-    });
-    
+    const post = await prisma.post.findUnique({ where: { id }, include: { user: { select: { id: true, username: true } } } });
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
-    
     const fan = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
     const existingLike = await prisma.like.findFirst({ where: { postId: id, userId } });
 
@@ -364,22 +243,14 @@ exports.toggleLike = async (req, res) => {
         return res.status(200).json({ message: 'Like actualizado' });
       }
     }
-
     await prisma.like.create({ data: { postId: id, userId, emoji: emoji || '❤️' } });
-    
     if (post.userId !== userId) {
       await prisma.notification.create({
-        data: {
-          userId: post.userId,
-          type: 'LIKE',
-          content: `@${fan.username} reaccionó con ${emoji || '❤️'} a tu publicación.`,
-          link: `/feed#post-${post.id}`
-        }
+        data: { userId: post.userId, type: 'LIKE', content: `@${fan.username} reaccionó con ${emoji || '❤️'}.`, link: `/feed#post-${post.id}` }
       });
     }
-
     res.status(201).json({ message: 'Like agregado' });
-  } catch (error) { res.status(500).json({ error: 'Error en el like.' }); }
+  } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
 
 exports.addComment = async (req, res) => {
@@ -387,57 +258,27 @@ exports.addComment = async (req, res) => {
     const { id } = req.params;
     const { content, parentId } = req.body; 
     const userId = req.user.userId;
-
-    const post = await prisma.post.findUnique({ 
-      where: { id },
-      include: { user: { select: { id: true, username: true } } }
-    });
-
+    const post = await prisma.post.findUnique({ where: { id }, include: { user: { select: { id: true, username: true } } } });
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
-
     const fan = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
-
-    const comment = await prisma.comment.create({
-      data: { content, postId: id, userId, parentId: parentId || null }
-    });
-
-    let notifiedUserId = null;
+    const comment = await prisma.comment.create({ data: { content, postId: id, userId, parentId: parentId || null } });
 
     if (parentId) {
       const parentComment = await prisma.comment.findUnique({ where: { id: parentId } });
       if (parentComment && parentComment.userId !== userId) {
         await prisma.notification.create({
-          data: {
-            userId: parentComment.userId,
-            type: 'REPLY',
-            content: `@${fan.username} respondió a tu comentario: "${content.substring(0, 30)}..."`,
-            link: `/feed#post-${post.id}-comment-${comment.id}` 
-          }
+          data: { userId: parentComment.userId, type: 'REPLY', content: `@${fan.username} respondió a tu comentario.`, link: `/feed#post-${post.id}-comment-${comment.id}` }
         });
-        notifiedUserId = parentComment.userId;
       }
     } 
-
-    if (post.userId !== userId && post.userId !== notifiedUserId) {
+    if (post.userId !== userId) {
       await prisma.notification.create({
-        data: {
-          userId: post.userId,
-          type: 'COMMENT',
-          content: `@${fan.username} comentó en tu publicación: "${content.substring(0, 30)}..."`,
-          link: `/feed#post-${post.id}-comment-${comment.id}` 
-        }
+        data: { userId: post.userId, type: 'COMMENT', content: `@${fan.username} comentó en tu post.`, link: `/feed#post-${post.id}-comment-${comment.id}` }
       });
     }
-
     res.status(201).json(comment);
-  } catch (error) { 
-    console.error("Error al agregar comentario:", error);
-    res.status(500).json({ error: 'Error al comentar.' }); 
-  }
+  } catch (error) { res.status(500).json({ error: 'Error al comentar.' }); }
 };
-
-exports.toggleCommentLike = async (req, res) => { res.status(200).json({ message: 'Funcionalidad activa.' }); };
-exports.buyBoost = async (req, res) => { res.status(200).json({ message: 'Pasarela lista.' }); };
 
 exports.deletePost = async (req, res) => {
   try {
@@ -446,36 +287,30 @@ exports.deletePost = async (req, res) => {
     const post = await prisma.post.findUnique({ where: { id } });
     if (!post || post.userId !== userId) return res.status(403).json({ error: 'No autorizado.' });
     if (post.mediaUrl && post.mediaUrl.includes('cloudinary.com')) {
-      const parts = post.mediaUrl.split('/');
-      const filenameWithExt = parts[parts.length - 1];
-      const publicId = 'fansmio_uploads/' + filenameWithExt.split('.'); 
-      await cloudinary.uploader.destroy(publicId).catch(() => console.log("No se pudo borrar de Cloudinary"));
-    } else if (post.mediaUrl) {
-      const fileName = post.mediaUrl.replace('/uploads/', '');
-      const filePath = path.join(__dirname, '..', 'uploads', fileName);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+       // Si es JSON, borrar todos, si es string, borrar uno
+       let urls = [];
+       try { urls = JSON.parse(post.mediaUrl); if(!Array.isArray(urls)) urls = [post.mediaUrl]; } catch(e) { urls = [post.mediaUrl]; }
+       for (const url of urls) {
+         const parts = url.split('/');
+         const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
+         await cloudinary.uploader.destroy(publicId).catch(() => {});
+       }
     }
     await prisma.post.delete({ where: { id } });
-    res.status(200).json({ message: 'Post eliminado con éxito.' });
-  } catch (error) { res.status(500).json({ error: 'Error al eliminar.' }); }
+    res.status(200).json({ message: 'Aniquilado.' });
+  } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
 
 exports.deleteComment = async (req, res) => {
   try {
     const { id } = req.params; 
     const userId = req.user.userId;
-
     const comment = await prisma.comment.findUnique({ where: { id } });
-    if (!comment) return res.status(404).json({ error: 'Comentario no encontrado' });
-
-    if (comment.userId !== userId) {
-      return res.status(403).json({ error: 'No autorizado' });
-    }
-
+    if (!comment || comment.userId !== userId) return res.status(403).json({ error: 'No autorizado' });
     await prisma.comment.delete({ where: { id } });
-    res.status(200).json({ message: 'Comentario eliminado exitosamente' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error interno al eliminar comentario.' });
-  }
+    res.status(200).json({ message: 'Eliminado.' });
+  } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
+
+exports.toggleCommentLike = async (req, res) => { res.status(200).json({ message: 'Ok' }); };
+exports.buyBoost = async (req, res) => { res.status(200).json({ message: 'Ok' }); };
