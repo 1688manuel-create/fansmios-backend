@@ -100,58 +100,86 @@ exports.createPost = async (req, res) => {
     const { content, isPPV, price } = req.body;
     const userId = req.user.userId;
     
-    const mediaUrl = req.file ? req.file.path : null; 
-    const mediaType = req.file ? (req.file.mimetype.startsWith('video/') ? 'VIDEO' : 'IMAGE') : 'TEXT';
+    // 🔥 Aceptamos múltiples archivos (req.files) o mantenemos soporte si llega 1 solo (req.file)
+    const files = req.files || (req.file ? [req.file] : []);
+    
+    let mediaUrls = [];
+    let mediaType = 'TEXT';
 
-    if (!content && !mediaUrl) {
+    if (files.length > 0) {
+      // 1. Verificamos las reglas del Comandante (1 video o 5 imágenes)
+      const hasVideo = files.some(f => f.mimetype.startsWith('video/'));
+      
+      if (hasVideo && files.length > 1) {
+        // Borramos basura local si hubo error
+        files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+        return res.status(400).json({ error: 'Solo puedes subir 1 video por publicación.' });
+      }
+      if (files.length > 5) {
+        files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+        return res.status(400).json({ error: 'Máximo 5 imágenes permitidas.' });
+      }
+
+      mediaType = hasVideo ? 'VIDEO' : 'IMAGE';
+
+      // 2. Escaneamos y guardamos CADA archivo
+      for (const file of files) {
+        console.log(`🔍 Escaneando contenido: ${file.path}`);
+        const scanResult = await scanContentStrict(file.path, file.mimetype);
+        
+        if (!scanResult.isSafe) {
+          // Si UNO es ilegal, destruimos TODOS
+          for (const f of files) {
+            if (f.path.startsWith('http')) {
+               const parts = f.path.split('/');
+               const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
+               await cloudinary.uploader.destroy(publicId, { resource_type: mediaType.toLowerCase() }).catch(()=>{});
+            } else if (fs.existsSync(f.path)) {
+               fs.unlinkSync(f.path);
+            }
+          }
+          return res.status(403).json({ error: `Publicación bloqueada: ${scanResult.reason}. 🚫` });
+        }
+        // Guardamos la URL segura
+        mediaUrls.push(file.path);
+      }
+    }
+
+    if (!content && mediaUrls.length === 0) {
       return res.status(400).json({ error: 'El post debe tener texto o imagen.' });
     }
 
     if (content && containsForbiddenWords(content)) {
-      if (req.file && req.file.path) {
-        if (req.file.path.startsWith('http')) {
-           const parts = req.file.path.split('/');
+      // Limpiamos si hay groserías
+      for (const f of files) {
+        if (f.path.startsWith('http')) {
+           const parts = f.path.split('/');
            const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
            await cloudinary.uploader.destroy(publicId).catch(()=>{});
-        } else if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        } else if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
       }
       return res.status(403).json({ error: 'Tu publicación contiene palabras prohibidas. 🛑' });
     }
 
-    // 🛡️ ESCANEO MILITAR ANTES DE PUBLICAR
-    if (req.file && req.file.path) {
-      console.log(`🔍 Escaneando contenido: ${mediaUrl}`);
-      const scanResult = await scanContentStrict(req.file.path, req.file.mimetype);
-      
-      if (!scanResult.isSafe) {
-        // 🔥 SI ES IA, DESTRUIR ARCHIVO DE LA NUBE O LOCAL
-        if (req.file.path.startsWith('http')) {
-           // Extraer el Public ID de Cloudinary desde la URL para borrarlo
-           const parts = req.file.path.split('/');
-           const filenameWithExt = parts[parts.length - 1];
-           // Asegúrate de que tu carpeta se llama 'fansmio_uploads' en Cloudinary
-           const publicId = 'fansmio_uploads/' + filenameWithExt.split('.'); 
-           await cloudinary.uploader.destroy(publicId, { resource_type: mediaType.toLowerCase() }).catch(()=>console.log("No se pudo borrar de Cloudinary"));
-        } else if (fs.existsSync(req.file.path)) {
-           fs.unlinkSync(req.file.path);
-        }
-        return res.status(403).json({ error: `Publicación bloqueada: ${scanResult.reason}. 🚫` });
-      }
-    }
+    // 🔥 TRUCO MAESTRO: Si hay más de 1, guardamos un Array JSON en la misma columna. Si es 1, normal.
+    const finalMediaUrl = mediaUrls.length > 1 ? JSON.stringify(mediaUrls) : (mediaUrls.length === 1 ? mediaUrls : null);
 
     const newPost = await prisma.post.create({
-      data: { content: content || null, mediaUrl, mediaType, isPPV: isPPV === 'true' || isPPV === true, price: price ? parseFloat(price) : 0, userId },
+      data: { content: content || null, mediaUrl: finalMediaUrl, mediaType, isPPV: isPPV === 'true' || isPPV === true, price: price ? parseFloat(price) : 0, userId },
       include: { user: { select: { email: true, username: true } } }
     });
     
     res.status(201).json({ message: 'Post publicado con éxito', post: newPost });
   } catch (error) { 
-    if (req.file && req.file.path) {
-        if (req.file.path.startsWith('http')) {
-           const parts = req.file.path.split('/');
+    console.error("Error en createPost:", error);
+    // Limpieza de emergencia en caso de fallo crítico
+    const files = req.files || (req.file ? [req.file] : []);
+    for (const f of files) {
+        if (f.path.startsWith('http')) {
+           const parts = f.path.split('/');
            const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
            await cloudinary.uploader.destroy(publicId).catch(()=>{});
-        } else if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        } else if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
     }
     res.status(500).json({ error: 'Error interno del servidor al publicar.' }); 
   }

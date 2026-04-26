@@ -7,8 +7,8 @@ const { verifyToken } = require('../middlewares/authMiddleware');
 // 🔥 IMPORTAMOS EL CARGADOR DE LA NUBE
 const { uploadCloudinary } = require('../utils/cloudinaryConfig');
 
-// ☁️ Usamos uploadCloudinary para interceptar la foto y mandarla a la Bóveda
-router.post('/', verifyToken, uploadCloudinary.single('media'), postController.createPost);
+// ☁️ Usamos uploadCloudinary.array para interceptar hasta 5 fotos y mandarlas a la Bóveda
+router.post('/', verifyToken, uploadCloudinary.array('media', 5), postController.createPost);
 
 router.get('/', verifyToken, postController.getAllPosts);
 router.get('/creator/:username', verifyToken, postController.getCreatorPosts);
