@@ -210,8 +210,12 @@ exports.getCreatorPosts = async (req, res) => {
       }
     });
     
+    let isSubscribed = false; // 🔥 VARIABLE RECUPERADA
+
     const formattedPosts = posts.map(post => {
-      const isSubscribed = post.user?.subscribers?.length > 0;
+      // 🔥 EVALUAMOS SUSCRIPCIÓN ANTES DE REVISAR ACCESO
+      if (post.user?.subscribers?.length > 0) isSubscribed = true;
+      
       const hasAccess = post.userId === userId || post.purchases?.length > 0 || (isSubscribed && !post.isPPV);
       const myReactionObj = post.likes.find(l => l.userId === userId);
       const reactionCounts = { '❤️': 0, '❤️‍🔥': 0, '🤤': 0, '🫦': 0 };
@@ -220,7 +224,8 @@ exports.getCreatorPosts = async (req, res) => {
       return { ...post, hasAccess, myReaction: myReactionObj ? myReactionObj.emoji : null, reactionCounts, content: hasAccess ? post.content : null };
     });
 
-    res.status(200).json({ posts: formattedPosts });
+    // 🔥 DEVOLVEMOS LA VARIABLE PARA QUE EL BOTÓN NO SE REGRESE
+    res.status(200).json({ posts: formattedPosts, isSubscribed });
   } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
 
