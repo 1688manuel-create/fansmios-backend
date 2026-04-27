@@ -60,6 +60,9 @@ module.exports = (io) => {
       // Monitor de consola para el servidor
       if (messageData.isDonation) {
         console.log(`💸 [SUPER CHAT] Lluvia de $${messageData.amount} USD en sala ${messageData.streamId}`);
+        
+        // 🎯 CIRUGÍA APLICADA AQUÍ: Avisamos a los demás para subir la barra de Meta
+        socket.to(messageData.streamId).emit('updateLiveGoal', { amount: messageData.amount });
       }
 
       // Disparamos la lluvia de dinero / mensaje a todos los demás
