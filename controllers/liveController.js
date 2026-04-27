@@ -5,6 +5,8 @@ const prisma = new PrismaClient();
 const muxService = require('../utils/muxService');
 const { jwt } = require('@mux/mux-node'); 
 
+const crypto = require('crypto'); // Herramienta para crear códigos únicos
+
 // ==========================================
 // 1. INICIAR UNA NUEVA TRANSMISIÓN (Creador)
 // ==========================================
@@ -21,7 +23,7 @@ exports.createLiveStream = async (req, res) => {
       return res.status(400).json({ error: 'Debes definir un precio válido para el PPV.' });
     }
 
-    // Cerrar stream activo si existe (Evitar transmisiones fantasma)
+    // Apagar cualquier stream viejo que se haya quedado prendido por error
     const activeStream = await prisma.liveStream.findFirst({
       where: { creatorId, status: { in: ['SCHEDULED', 'LIVE'] } }
     });
@@ -33,9 +35,10 @@ exports.createLiveStream = async (req, res) => {
       });
     }
 
-    // Crear infraestructura en MUX
-    const muxData = await muxService.createLiveStream(isPPV);
+    // Crear una llave secreta súper rápida para LiveKit
+    const superKey = crypto.randomBytes(8).toString('hex');
 
+    // Crear la sala en la base de datos (SIN MUX, pura velocidad)
     const newStream = await prisma.liveStream.create({
       data: {
         creatorId,
@@ -43,20 +46,20 @@ exports.createLiveStream = async (req, res) => {
         isPPV: isPPV || false,
         price: isPPV ? parseFloat(price) : 0,
         status: 'SCHEDULED',
-        streamKey: muxData.streamKey,
-        playbackId: muxData.playbackId,
+        streamKey: superKey,
+        // Ya no guardamos playbackId porque no usamos MUX aquí
       }
     });
 
     res.status(201).json({
-      message: 'Sala de transmisión creada 🔴',
+      message: 'Sala de transmisión súper rápida creada ⚡',
       liveStream: newStream,
       streamId: newStream.id
     });
 
   } catch (error) {
     console.error('❌ Error al crear live stream:', error);
-    res.status(500).json({ error: 'Error interno al conectar con el servidor de video.' });
+    res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };
 

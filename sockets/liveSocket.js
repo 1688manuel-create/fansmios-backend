@@ -75,7 +75,16 @@ module.exports = (io) => {
     });
 
     // ==========================================
-    // 🔌 4. DESCONEXIÓN AUTOMÁTICA
+    // 🛡️ 4. SALTO VIP (BLOQUEAR SALA EN VIVO)
+    // ==========================================
+    socket.on('activatePaywall', ({ streamId, price }) => {
+      console.log(`🔒 El Creador bloqueó la sala ${streamId}. Nuevo Precio: $${price}`);
+      // Le mandamos la alerta roja a todos los fans para que les salga la pantalla de cobro
+      socket.to(streamId).emit('paywallActivated', { price });
+    });
+
+    // ==========================================
+    // 🔌 5. DESCONEXIÓN AUTOMÁTICA
     // ==========================================
     socket.on('disconnect', () => {
       console.log(`🔌 Usuario desconectado: ${socket.id}`);
