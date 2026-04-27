@@ -323,3 +323,58 @@ exports.getFeedStreams = async (req, res) => {
     res.status(500).json({ error: 'Error interno' });
   }
 };
+
+// ==========================================
+// 6. COMPRAR TICKET VIP AL INSTANTE (ONE-CLICK)
+// ==========================================
+exports.buyLiveTicket = async (req, res) => {
+  try {
+    const fanId = req.user.userId;
+    const { streamId, amount } = req.body;
+
+    // 1. Revisamos la billetera del fan
+    const fanWallet = await prisma.wallet.findUnique({ where: { userId: fanId } });
+    if (!fanWallet || fanWallet.balance < amount) {
+      return res.status(400).json({ error: 'Saldo insuficiente. Recarga tu Covra Wallet.' });
+    }
+
+    const stream = await prisma.liveStream.findUnique({ where: { id: streamId } });
+
+    // 2. Le descontamos el dinero al fan
+    await prisma.wallet.update({
+      where: { userId: fanId },
+      data: { balance: { decrement: amount } }
+    });
+
+    // 3. Calculamos la comisión (ej. 20%) y le pagamos al creador
+    const platformFeePercent = 20; 
+    const feeAmount = (amount * platformFeePercent) / 100;
+    const netAmount = amount - feeAmount;
+
+    await prisma.wallet.upsert({
+      where: { userId: stream.creatorId },
+      update: { balance: { increment: netAmount } },
+      create: { userId: stream.creatorId, balance: netAmount }
+    });
+
+    // 4. Imprimimos el ticket digital en la base de datos
+    await prisma.transaction.create({
+      data: {
+        senderId: fanId,
+        receiverId: stream.creatorId,
+        amount: amount,
+        platformFee: feeAmount,
+        netAmount: netAmount,
+        type: 'LIVE_TICKET',
+        status: 'COMPLETED',
+        postId: streamId
+      }
+    });
+
+    res.status(200).json({ success: true, message: '¡Ticket VIP Desbloqueado!' });
+
+  } catch (error) {
+    console.error('❌ Error al comprar ticket VIP:', error);
+    res.status(500).json({ error: 'Error procesando el pago VIP.' });
+  }
+};

@@ -25,4 +25,7 @@ router.post('/message', verifyToken, liveController.sendLiveMessage);
 // Entrar a una sala (Aquí el controlador valida si tiene Ticket PPV o es VIP)
 router.get('/:streamId', verifyToken, liveController.getLiveStream); // 👈 Siempre al final
 
+// Comprar Ticket VIP al instante
+router.post('/buy-ticket', verifyToken, liveController.buyLiveTicket);
+
 module.exports = router;
