@@ -130,21 +130,23 @@ exports.getLiveStream = async (req, res) => {
       return res.status(404).json({ error: 'Transmisión no encontrada o finalizada.' });
     }
 
+    // 🛡️ REGLAS DE NEGOCIO Y ACCESO CORREGIDAS
     let hasAccess = false;
 
-    // 🛡️ REGLAS DE NEGOCIO Y ACCESO
     if (stream.creator.id === fanId || req.user?.role === 'ADMIN') {
-      hasAccess = true; // El creador y el Admin siempre entran gratis
-    } else if (stream.isPPV && fanId) {
-      const ticket = await prisma.transaction.findFirst({
-        where: { senderId: fanId, postId: stream.id, type: 'LIVE_TICKET', status: 'COMPLETED' }
-      });
-      if (ticket) hasAccess = true;
-    } else if (!stream.isPPV && fanId) {
-      const isVIP = await prisma.subscription.findFirst({
-        where: { fanId, creatorId: stream.creator.id, status: 'ACTIVE' }
-      });
-      if (isVIP) hasAccess = true;
+      // 1. El creador y el Admin SIEMPRE entran gratis
+      hasAccess = true; 
+    } else if (stream.isPPV) {
+      // 2. Si la sala tiene CANDADO (isPPV = true), verificamos si compró el ticket
+      if (fanId) {
+        const ticket = await prisma.transaction.findFirst({
+          where: { senderId: fanId, postId: stream.id, type: 'LIVE_TICKET', status: 'COMPLETED' }
+        });
+        if (ticket) hasAccess = true; // Pagó, lo dejamos pasar
+      }
+    } else {
+      // 3. Si la sala NO tiene candado (isPPV = false), es PÚBLICA. Entran todos.
+      hasAccess = true;
     }
 
     // 🔑 FIRMA CRIPTOGRÁFICA (JWT) O SIMULACIÓN

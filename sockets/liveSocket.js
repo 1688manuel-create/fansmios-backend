@@ -9,11 +9,10 @@ module.exports = (io) => {
     // ==========================================
     // 1. UNIRSE A LA TRANSMISIÓN (SALA), MODO FANTASMA Y CONTADOR
     // ==========================================
-    // Recibimos isGhost desde el Frontend
     socket.on('joinLiveStream', async ({ streamId, userId, isGhost }) => {
       socket.join(streamId);
       
-      // Guardamos en la memoria temporal del socket en qué sala está y si es FANTASMA
+      // Guardamos el estado inicial que manda el frontend
       socket.data.streamId = streamId; 
       socket.data.isGhost = isGhost || false; 
       
@@ -21,31 +20,34 @@ module.exports = (io) => {
         if (userId) {
           const user = await prisma.user.findUnique({ where: { id: userId } });
           
-          // 👻 Si es ADMIN o viene marcado como Fantasma, entra en absoluto secreto
-          if (isGhost || user?.role === 'ADMIN') {
+          // 🔥 BLINDAJE ABSOLUTO: Si es ADMIN, forzamos el modo fantasma desde el servidor
+          if (user?.role === 'ADMIN') {
+            socket.data.isGhost = true; 
+          }
+          
+          // Ahora usamos socket.data.isGhost que ya está blindado
+          if (socket.data.isGhost) {
             console.log(`👻 ADMIN/FANTASMA entró en secreto al Live: ${streamId}`);
           } else {
             console.log(`👤 Usuario ${user?.username} entró al Live: ${streamId}`);
-            // Avisamos a la sala que alguien normal entró
             socket.to(streamId).emit('userJoined', { username: user?.username });
           }
         }
         
-        // 📊 Calculamos los espectadores REALES (Ignorando a los Fantasmas)
+        // 📊 Calculamos los espectadores REALES
         const room = io.sockets.adapter.rooms.get(streamId);
         let viewersCount = 0;
         
         if (room) {
           for (const socketId of room) {
             const clientSocket = io.sockets.sockets.get(socketId);
-            // Sumamos solo si el usuario NO es un fantasma
+            // El Admin no se sumará porque forzamos su isGhost a true arriba
             if (clientSocket && !clientSocket.data.isGhost) {
               viewersCount++;
             }
           }
         }
         
-        // 📢 Disparamos el nuevo contador filtrado a TODOS en la sala
         io.to(streamId).emit('viewerCountUpdated', { count: viewersCount });
 
       } catch (error) {
@@ -78,11 +80,26 @@ module.exports = (io) => {
     });
 
     // ==========================================
-    // 🛡️ 4. SALTO VIP (BLOQUEAR SALA EN VIVO)
+    // 🛡️ 4. SALTO VIP (BLOQUEAR SALA EN VIVO PERMANENTEMENTE)
     // ==========================================
-    socket.on('activatePaywall', ({ streamId, price }) => {
+    socket.on('activatePaywall', async ({ streamId, price }) => {
       console.log(`🔒 El Creador bloqueó la sala ${streamId}. Nuevo Precio: $${price}`);
-      // Le mandamos la alerta roja a todos los fans para que les salga la pantalla de cobro
+      
+      try {
+        // 🔥 EL BLINDAJE: Guardamos el candado en la Base de Datos. 
+        // Si alguien recarga la página, el servidor sabrá que ya es de pago.
+        await prisma.liveStream.update({
+          where: { id: streamId },
+          data: { 
+            isPPV: true, 
+            price: parseFloat(price) 
+          }
+        });
+      } catch (error) {
+        console.error("Error sellando la puerta en la Base de Datos:", error);
+      }
+
+      // Le mandamos la alerta roja a todos los fans conectados para expulsarlos
       socket.to(streamId).emit('paywallActivated', { price });
     });
 
