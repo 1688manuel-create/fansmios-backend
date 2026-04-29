@@ -10,6 +10,8 @@ const { Server } = require('socket.io');
 
 // 🔥 NUEVO: El Cadenero VIP de LiveKit
 const { AccessToken } = require('livekit-server-sdk');
+// Importamos al guardia de seguridad para leer los tokens
+const { verifyToken } = require('./middlewares/authMiddleware');
 
 // Importación de Tareas en Segundo Plano (Cron Jobs)
 const { startSubscriptionCron } = require('./utils/subscriptionCron'); 
@@ -129,10 +131,17 @@ app.use('/api/profile/kyc', require('./routes/kycRoutes'));
 app.use('/api/2fa', require('./routes/auth2faRoutes'));
 app.use('/api/series', seriesRoutes);
 
-// 🔥 NUEVO: RUTA PARA EL BOLETO DE LIVEKIT (EXPERIENCIA TIKTOK)
-app.post('/api/livekit/token', async (req, res) => {
+
+// 🔥 NUEVO: RUTA PARA EL BOLETO DE LIVEKIT BLINDADA PARA FANTASMAS
+app.post('/api/livekit/token', verifyToken, async (req, res) => {
   try {
     const { roomName, participantName, isCreator } = req.body;
+
+    // 1. Detectamos si el usuario real es el Admin Supremo
+    const isAdmin = String(req.user?.role).toUpperCase() === 'ADMIN';
+
+    // 2. Si es Admin, le quitamos el poder de prender su cámara por error
+    const canPublishVideo = isCreator && !isAdmin;
 
     const at = new AccessToken(
       process.env.LIVEKIT_API_KEY,
@@ -146,8 +155,9 @@ app.post('/api/livekit/token', async (req, res) => {
     at.addGrant({
       roomJoin: true,
       room: roomName,
-      canPublish: isCreator === true, 
+      canPublish: canPublishVideo, 
       canSubscribe: true,    
+      hidden: isAdmin // 👻 ¡MAGIA! LA CAPA DE INVISIBILIDAD ABSOLUTA EN EL VIDEO
     });
 
     const token = await at.toJwt();
