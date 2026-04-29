@@ -13,7 +13,6 @@ module.exports = (io) => {
     socket.on('joinLiveStream', async ({ streamId, userId, isGhost, isCreator }) => {
       socket.join(streamId);
       
-      // Guardamos el estado inicial que manda el frontend
       socket.data.streamId = streamId; 
       socket.data.isGhost = isGhost || false; 
       
@@ -21,16 +20,13 @@ module.exports = (io) => {
         if (userId) {
           const user = await prisma.user.findUnique({ where: { id: userId } });
           
-          // 🔥 BLINDAJE ABSOLUTO: Si es ADMIN, forzamos el modo fantasma desde el servidor
           if (user?.role === 'ADMIN') {
             socket.data.isGhost = true; 
           }
 
-          // 🚀 DISPARO DE NOTIFICACIONES (Solo si es el Creador y no es un Admin/Fantasma)
           if (isCreator && !socket.data.isGhost) {
             console.log(`📢 Creador detectado. Iniciando ráfaga de notificaciones para ${user?.username}...`);
             
-            // Llamamos al servicio masivo que acabamos de blindar
             pushService.notifyFollowers(
               userId, 
               `¡${user?.username || 'Alguien'} ESTÁ EN VIVO! 🔥`, 
@@ -39,7 +35,6 @@ module.exports = (io) => {
             );
           }
           
-          // Ahora usamos socket.data.isGhost que ya está blindado
           if (socket.data.isGhost) {
             console.log(`👻 ADMIN/FANTASMA entró en secreto al Live: ${streamId}`);
           } else {
@@ -48,14 +43,12 @@ module.exports = (io) => {
           }
         }
         
-        // 📊 Calculamos los espectadores REALES
         const room = io.sockets.adapter.rooms.get(streamId);
         let viewersCount = 0;
         
         if (room) {
           for (const socketId of room) {
             const clientSocket = io.sockets.sockets.get(socketId);
-            // El Admin no se sumará porque forzamos su isGhost a true arriba
             if (clientSocket && !clientSocket.data.isGhost) {
               viewersCount++;
             }
@@ -70,16 +63,17 @@ module.exports = (io) => {
     });
 
     // ==========================================
-    // 🔥 2. EL REPETIDOR DE SEÑAL (Mensajes y Lluvia de Propinas)
+    // 🔥 2. EL REPETIDOR DE SEÑAL (CASA DE CAMBIO: MONEDAS A DÓLARES)
     // ==========================================
     socket.on('broadcastMessage', async (messageData) => {
-      const { streamId, senderId, amount, isDonation, text } = messageData;
+      // Nota: El frontend ahora debe mandar la cantidad de MONEDAS en el campo 'amount'
+      const { streamId, senderId, amount: coinsToDeduct, isDonation, text } = messageData;
 
       try {
-        if (isDonation && amount > 0) {
-          console.log(`💰 Procesando Donación Real de $${amount} USD...`);
+        if (isDonation && coinsToDeduct > 0) {
+          console.log(`🪙 Procesando Regalo de ${coinsToDeduct} Monedas...`);
 
-          // 🛡️ TRANSACCIÓN ATÓMICA: El dinero se mueve o el evento muere.
+          // 🛡️ TRANSACCIÓN ATÓMICA DE GRADO INDUSTRIAL
           const giftResult = await prisma.$transaction(async (tx) => {
             
             // 1. Buscamos la billetera del fan
@@ -87,12 +81,12 @@ module.exports = (io) => {
               where: { userId: senderId }
             });
 
-            // 🛑 EL FILTRO: Si no hay plata, lanzamos error y abortamos
-            if (!senderWallet || senderWallet.balance < amount) {
+            // 🛑 EL FILTRO: Verificamos el saldo en MONEDAS (coinBalance)
+            if (!senderWallet || senderWallet.coinBalance < coinsToDeduct) {
               throw new Error("SALDO_INSUFICIENTE");
             }
 
-            // 2. Buscamos quién es el creador de este Live para pagarle
+            // 2. Buscamos quién es el creador
             const stream = await tx.liveStream.findUnique({
               where: { id: streamId },
               select: { creatorId: true }
@@ -100,50 +94,53 @@ module.exports = (io) => {
 
             if (!stream) throw new Error("STREAM_NO_ENCONTRADO");
 
-            // 3. Calculamos la tajada (Ejemplo: 20% plataforma)
-            const fee = amount * 0.20;
-            const netAmount = amount - fee;
+            // 💰 3. LA CASA DE CAMBIO: Convertimos Monedas a Dólares
+            // Tasa de conversión: 100 Monedas = $1.00 USD
+            const usdValue = coinsToDeduct / 100;
+            const fee = usdValue * 0.20; // 20% para la plataforma
+            const netAmount = usdValue - fee; // Lo que se lleva el creador
 
-            // 4. RESTAMOS al fan y SUMAMOS al creador
+            // 4A. RESTAMOS MONEDAS al fan
             await tx.wallet.update({
               where: { userId: senderId },
-              data: { balance: { decrement: amount } }
+              data: { coinBalance: { decrement: coinsToDeduct } }
             });
 
+            // 4B. SUMAMOS DÓLARES al creador
             await tx.wallet.update({
               where: { userId: stream.creatorId },
               data: { balance: { increment: netAmount } }
             });
 
-            // 5. Dejamos rastro legal en la tabla de transacciones
+            // 5. REGISTRAMOS LA TRANSACCIÓN LEGALMENTE (Ajustado a tu Schema)
             await tx.transaction.create({
               data: {
                 senderId,
                 receiverId: stream.creatorId,
-                amount: amount,
-                platformFee: fee,
-                type: 'GIFT_LIVE',
+                amount: usdValue,       // Registramos el valor en USD
+                platformFee: fee,       // Tu comisión en USD
+                netAmount: netAmount,   // Ganancia neta del creador en USD
+                type: 'TIP',            // En tu Enum es TIP (Propina)
                 status: 'COMPLETED',
-                description: `Regalo en Vivo: ${text || 'Sin mensaje'}`
+                attachedMessage: `Regalo en Vivo: ${text || 'Animación'} (${coinsToDeduct} Monedas)` 
               }
             });
 
-            return { success: true };
+            return { success: true, usdValue };
           });
 
-          // Si la transacción fue un éxito, notificamos a la sala
-          console.log(`💸 [SUPER CHAT] Lluvia REAL de $${amount} USD en sala ${streamId}`);
-          socket.to(streamId).emit('updateLiveGoal', { amount: amount });
+          // Si todo salió bien, actualizamos la barra de meta en dólares
+          console.log(`💸 Lluvia exitosa. ${coinsToDeduct} Monedas convertidas a $${giftResult.usdValue} USD en sala ${streamId}`);
+          socket.to(streamId).emit('updateLiveGoal', { amount: giftResult.usdValue });
         }
 
-        // Emitimos el mensaje a todos (sea texto normal o donación exitosa)
+        // Emitimos la animación a toda la sala
         io.to(streamId).emit('newLiveMessage', messageData);
 
       } catch (error) {
         if (error.message === "SALDO_INSUFICIENTE") {
-          console.log(`❌ Intento de fraude: Usuario ${senderId} no tiene saldo.`);
-          // Le avisamos SOLO al fan que su regalo no salió por pobre
-          socket.emit('error', { message: "Saldo insuficiente. ¡Recarga para apoyar al creador! 💰" });
+          console.log(`❌ Intento de fraude: Usuario ${senderId} no tiene suficientes monedas.`);
+          socket.emit('error', { message: "No tienes suficientes monedas. ¡Recarga en la tienda! 🪙" });
         } else {
           console.error("Error crítico en broadcastMessage:", error);
         }
@@ -165,8 +162,6 @@ module.exports = (io) => {
       console.log(`🔒 El Creador bloqueó la sala ${streamId}. Nuevo Precio: $${price}`);
       
       try {
-        // 🔥 EL BLINDAJE: Guardamos el candado en la Base de Datos. 
-        // Si alguien recarga la página, el servidor sabrá que ya es de pago.
         await prisma.liveStream.update({
           where: { id: streamId },
           data: { 
@@ -178,7 +173,6 @@ module.exports = (io) => {
         console.error("Error sellando la puerta en la Base de Datos:", error);
       }
 
-      // Le mandamos la alerta roja a todos los fans conectados para expulsarlos
       socket.to(streamId).emit('paywallActivated', { price });
     });
 
@@ -188,13 +182,11 @@ module.exports = (io) => {
     socket.on('disconnect', () => {
       console.log(`🔌 Usuario desconectado: ${socket.id}`);
       
-      // Si el usuario estaba viendo un Live, recalculamos la sala
       if (socket.data.streamId) {
         const streamId = socket.data.streamId;
         const room = io.sockets.adapter.rooms.get(streamId);
         let viewersCount = 0;
         
-        // Volvemos a contar ignorando a los fantasmas restantes
         if (room) {
           for (const socketId of room) {
             const clientSocket = io.sockets.sockets.get(socketId);
@@ -204,7 +196,6 @@ module.exports = (io) => {
           }
         }
         
-        // Actualizamos el número en la pantalla
         io.to(streamId).emit('viewerCountUpdated', { count: viewersCount });
       }
     });
