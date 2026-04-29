@@ -150,7 +150,7 @@ model User {
 
   platformWithdrawals PlatformWithdrawal[]
 
-  sentMessages     Message[]      @relation("SentMessages")
+  sentMessages      Message[]      @relation("SentMessages")
   receivedMessages Message[]      @relation("ReceivedMessages")
   creatorChats     Conversation[] @relation("CreatorConversations")
   fanChats         Conversation[] @relation("FanConversations")
@@ -298,28 +298,31 @@ model Like {
   @@unique([userId, postId])
 }
 
+// 🔥 BILLETERA FUSIONADA: Dólares para Creadores, Monedas para Fans
 model Wallet {
-  id              String @id @default(uuid())
-  userId          String @unique
-  balance         Float  @default(0.0) 
-  pendingBalance  Float  @default(0.0) 
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  balance         Float    @default(0.0) // El dinero real (USD) que el Creador puede retirar
+  pendingBalance  Float    @default(0.0) 
+  coinBalance     Int      @default(0)   // 🔥 NUEVO: Las monedas virtuales que el Fan gasta
   cryptoAddress   String? 
   cryptoNetwork   String? 
+  createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Subscription {
-  id        String             @id @default(uuid())
-  fanId     String
-  creatorId String
-  status    SubscriptionStatus @default(ACTIVE)
-  price     Float
-  startDate DateTime           @default(now())
-  endDate   DateTime 
-  reminderSent Boolean @default(false) 
-  fan      User @relation("FanSubscriptions", fields: [fanId], references: [id], onDelete: Cascade)
-  creator  User @relation("CreatorSubscribers", fields: [creatorId], references: [id], onDelete: Cascade)
+  id             String             @id @default(uuid())
+  fanId          String
+  creatorId      String
+  status         SubscriptionStatus @default(ACTIVE)
+  price          Float
+  startDate      DateTime           @default(now())
+  endDate        DateTime 
+  reminderSent   Boolean @default(false) 
+  fan       User @relation("FanSubscriptions", fields: [fanId], references: [id], onDelete: Cascade)
+  creator   User @relation("CreatorSubscribers", fields: [creatorId], references: [id], onDelete: Cascade)
   @@unique([fanId, creatorId])
 }
 
@@ -340,7 +343,7 @@ model Transaction {
   createdAt       DateTime @default(now())
   sender          User     @relation("SentTransactions", fields: [senderId], references: [id], onDelete: Cascade)
   receiver        User     @relation("ReceivedTransactions", fields: [receiverId], references: [id], onDelete: Cascade)
-  fundsReleased Boolean @default(false)
+  fundsReleased   Boolean @default(false)
 }
 
 model Withdrawal {
@@ -351,7 +354,7 @@ model Withdrawal {
   cryptoAddress String? 
   cryptoNetwork String? 
   txHash        String? 
-  adminNotes String?
+  adminNotes    String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   creator    User     @relation("CreatorWithdrawals", fields: [creatorId], references: [id], onDelete: Cascade)
@@ -377,7 +380,7 @@ model Report {
   reason      String
   description String?
   status      String  @default("PENDING")
-  adminNotes String?
+  adminNotes  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -389,7 +392,7 @@ model PostPurchase {
   pricePaid Float
   createdAt DateTime @default(now())
   fan        User     @relation("FanPostPurchases", fields: [fanId], references: [id], onDelete: Cascade)
-  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
   @@unique([fanId, postId])
 }
 
@@ -407,7 +410,7 @@ model Conversation {
 
 model Message {
   id              String   @id @default(uuid())
-  conversationId String
+  conversationId  String
   senderId        String
   receiverId      String
   content         String?
@@ -417,11 +420,11 @@ model Message {
   isUnlocked      Boolean  @default(false)
   isRead          Boolean  @default(false)
   createdAt       DateTime @default(now())
-  conversation Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender        User              @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  receiver      User              @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
-  purchases     MessagePurchase[]
-  reports       Report[]
+  conversation    Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User              @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver        User              @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  purchases       MessagePurchase[]
+  reports         Report[]
 }
 
 model MessagePurchase {
@@ -431,7 +434,7 @@ model MessagePurchase {
   pricePaid Float
   createdAt DateTime @default(now())
   fan        User     @relation("FanMessagePurchases", fields: [fanId], references: [id], onDelete: Cascade)
-  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  message    Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
   @@unique([fanId, messageId])
 }
 
@@ -455,7 +458,7 @@ model BundlePurchase {
   pricePaid Float
   createdAt DateTime @default(now())
   fan        User     @relation("FanBundlePurchases", fields: [fanId], references: [id], onDelete: Cascade)
-  bundle    Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  bundle     Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
   @@unique([fanId, bundleId])
 }
 
@@ -501,13 +504,13 @@ model LiveStream {
   status     StreamStatus @default(SCHEDULED)
   streamKey  String       @unique
   playbackId String?
-  isPPV Boolean @default(false)
-  price Float?  @default(0.0) 
-  startedAt DateTime?
-  endedAt   DateTime?
-  createdAt DateTime          @default(now())
-  creator   User              @relation("CreatorLiveStreams", fields: [creatorId], references: [id], onDelete: Cascade)
-  messages  LiveChatMessage[]
+  isPPV      Boolean      @default(false)
+  price      Float?       @default(0.0) 
+  startedAt  DateTime?
+  endedAt    DateTime?
+  createdAt  DateTime     @default(now())
+  creator    User         @relation("CreatorLiveStreams", fields: [creatorId], references: [id], onDelete: Cascade)
+  messages   LiveChatMessage[]
 }
 
 model LiveChatMessage {
@@ -518,8 +521,8 @@ model LiveChatMessage {
   isDonation Boolean    @default(false)
   amount     Float?     @default(0.0)
   createdAt  DateTime   @default(now())
-  stream    LiveStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
-  user      User       @relation("UserLiveChatMessages", fields: [userId], references: [id], onDelete: Cascade)
+  stream     LiveStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+  user       User       @relation("UserLiveChatMessages", fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Block {
@@ -595,8 +598,8 @@ model PlatformSettings {
 }
 
 model SystemSetting {
-  key   String @id
-  value String @db.Text
+  key       String @id
+  value     String @db.Text
   updatedAt DateTime @updatedAt
 }
 
@@ -659,4 +662,29 @@ model PlatformWithdrawal {
   cryptoAddress String?  // Tu wallet personal a donde mandaste el dinero
   notes         String?  // Ej: "Retiro para pagar servidores"
   createdAt     DateTime @default(now())
+}
+
+// ==========================================
+// 🪙 ECONOMÍA INFINITA: REGALOS Y PAQUETES
+// ==========================================
+
+// Los regalos ya no cuestan dólares, cuestan Monedas.
+model Gift {
+  id          String   @id @default(uuid())
+  name        String
+  icon        String   // Aquí luego pondremos la URL del Lottie/GIF
+  coinPrice   Int      // 🔥 CAMBIADO: Precio en monedas (ej: 100)
+  tier        String   @default("BASIC") // 🔥 NUEVO: 'BASIC', 'EPIC', 'LEGENDARY'
+  createdAt   DateTime @default(now())
+}
+
+// NUEVA TABLA: PAQUETES DE MONEDAS (El producto de tu tienda)
+model CoinPackage {
+  id          String   @id @default(uuid())
+  name        String   // ej: "Puñado de Monedas", "Cofre de Monedas"
+  coins       Int      // ej: 100, 500, 1000
+  priceUsd    Float    // ej: 1.00, 4.50, 9.00 (El fan paga menos si compra más)
+  bonus       Int      @default(0) // ej: +50 monedas de regalo para incentivar compras grandes
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
 }
