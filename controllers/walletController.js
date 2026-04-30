@@ -191,7 +191,7 @@ exports.updateCryptoAddress = async (req, res) => {
 };
 
 // ==========================================
-// 🪙 NUEVO: GENERAR ORDEN DE COMPRA DE MONEDAS (PAYRAM)
+// 🪙 NUEVO: GENERAR ORDEN DE COMPRA DE MONEDAS (PAYRAM / COVRA PAY)
 // ==========================================
 exports.buyCoins = async (req, res) => {
   try {
@@ -205,12 +205,14 @@ exports.buyCoins = async (req, res) => {
     // 🐎 EL CABALLO DE TROYA: Pegamos el ID con las monedas para que el Webhook sepa cuánto entregar
     const trojanPayload = `${userId}:::${coinsToAdd}`;
 
-    // ⚡ CONEXIÓN A PAYRAM
-    // Nota: Sustituye la URL por el endpoint exacto de creación de órdenes de PayRam
-    const payramResponse = await axios.post('https://api.payram.app/api/v1/invoices', {
+    // ⚡ CONEXIÓN A PAYRAM (COVRA PAY)
+    // Usamos tu dominio oficial desde el .env
+    const payramUrl = `${process.env.PAYRAM_BASE_URL}/api/v1/invoices`; 
+
+    const payramResponse = await axios.post(payramUrl, {
       amount: amountUsd,
       currency: 'USD',
-      customer_id: trojanPayload, // Aquí mandamos el paquete escondido
+      customer_id: trojanPayload, 
       description: `Fansmio: Paquete de ${coinsToAdd} Monedas`,
       success_url: `${process.env.FRONTEND_URL}/dashboard/wallet`,
       cancel_url: `${process.env.FRONTEND_URL}/dashboard/wallet`
@@ -218,20 +220,23 @@ exports.buyCoins = async (req, res) => {
       headers: { 
         'Authorization': `Bearer ${process.env.PAYRAM_API_KEY}`,
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: 8000 // 🔥 Obliga a fallar rápido si hay un bloqueo de red (8 segundos)
     });
 
-    // PayRam debería regresarte un link de pago (checkoutUrl)
+    // CovraPay debería regresarte un link de pago (checkoutUrl)
     const checkoutUrl = payramResponse.data.checkout_url || payramResponse.data.payment_link || payramResponse.data.url;
 
     if (!checkoutUrl) {
-      throw new Error("PayRam no devolvió una URL de pago válida.");
+      throw new Error("La pasarela no devolvió una URL de pago válida.");
     }
 
     res.status(200).json({ checkoutUrl });
 
   } catch (error) {
-    console.error("❌ Error generando orden PayRam:", error.response?.data || error.message);
-    res.status(500).json({ error: "No se pudo conectar con la pasarela blindada." });
+    console.error("❌ Error generando orden CovraPay:", error.message);
+    if (error.response) console.error("Detalle del error:", error.response.data);
+    
+    res.status(500).json({ error: "No se pudo conectar con la pasarela blindada. Intenta de nuevo." });
   }
 };
