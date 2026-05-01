@@ -191,52 +191,45 @@ exports.updateCryptoAddress = async (req, res) => {
 };
 
 // ==========================================
-// 🪙 NUEVO: GENERAR ORDEN DE COMPRA DE MONEDAS (PAYRAM / COVRA PAY)
+// 🪙 GENERAR ORDEN DE COMPRA DE MONEDAS (COVRA PAY)
 // ==========================================
 exports.buyCoins = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { packageId, amountUsd, coinsToAdd } = req.body;
+    const { amountUsd, coinsToAdd } = req.body;
 
-    if (!amountUsd || !coinsToAdd) {
+    if (!amountUsd) {
       return res.status(400).json({ error: 'Datos del paquete inválidos.' });
     }
 
-    // 🐎 EL CABALLO DE TROYA: Pegamos el ID con las monedas para que el Webhook sepa cuánto entregar
-    const trojanPayload = `${userId}:::${coinsToAdd}`;
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    // ⚡ CONEXIÓN A PAYRAM (COVRA PAY)
-    // Usamos tu dominio oficial desde el .env
-    const payramUrl = `${process.env.PAYRAM_BASE_URL}/api/v1/invoices`; 
+    // ⚡ CONEXIÓN A COVRA PAY (CON EL ID LIMPIO Y PURO)
+    const covraUrl = `${process.env.PAYRAM_BASE_URL}/api/v1/payment`; 
 
-    const payramResponse = await axios.post(payramUrl, {
-      amount: amountUsd,
-      currency: 'USD',
-      customer_id: trojanPayload, 
-      description: `Fansmio: Paquete de ${coinsToAdd} Monedas`,
-      success_url: `${process.env.FRONTEND_URL}/dashboard/wallet`,
-      cancel_url: `${process.env.FRONTEND_URL}/dashboard/wallet`
+    const payramResponse = await axios.post(covraUrl, {
+      customerEmail: user.email,     
+      customerID: userId.toString(), // 👈 Cero trucos. ID limpio para evitar el 404.
+      amountInUSD: amountUsd         
     }, {
       headers: { 
-        'Authorization': `Bearer ${process.env.PAYRAM_API_KEY}`,
+        'API-Key': process.env.PAYRAM_API_KEY, 
         'Content-Type': 'application/json'
       },
-      timeout: 8000 // 🔥 Obliga a fallar rápido si hay un bloqueo de red (8 segundos)
+      timeout: 8000 
     });
 
-    // CovraPay debería regresarte un link de pago (checkoutUrl)
-    const checkoutUrl = payramResponse.data.checkout_url || payramResponse.data.payment_link || payramResponse.data.url;
+    const checkoutUrl = payramResponse.data.url;
 
     if (!checkoutUrl) {
-      throw new Error("La pasarela no devolvió una URL de pago válida.");
+      throw new Error("Covra Pay no devolvió una URL de checkout válida.");
     }
 
     res.status(200).json({ checkoutUrl });
 
   } catch (error) {
     console.error("❌ Error generando orden CovraPay:", error.message);
-    if (error.response) console.error("Detalle del error:", error.response.data);
-    
     res.status(500).json({ error: "No se pudo conectar con la pasarela blindada. Intenta de nuevo." });
   }
 };

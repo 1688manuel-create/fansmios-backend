@@ -12,7 +12,7 @@ const { sendPushNotification } = require('../utils/pushService');
 
 exports.createPaymentIntent = async (req, res) => {
   try {
-    let { amount, type, description, couponCode, creatorId, postId, bundleId, messageId, attachedMessage } = req.body; 
+    let { amount, type, description, couponCode, creatorId, postId, bundleId, messageId, attachedMessage, coinsToAdd } = req.body;
     const fanId = req.user.userId;
 
     if (type === 'POST') type = 'PPV_POST';
@@ -70,10 +70,14 @@ exports.createPaymentIntent = async (req, res) => {
       
       console.log(`[PAYRAM] Generando enlace de recarga para usuario ${fan.username} - Monto: $${finalAmount}`);
 
+      // 🐎 EL CABALLO DE TROYA: Pegamos el ID con las monedas para salvar los Bonos Gratis
+      // Si no vienen coinsToAdd (por error), enviamos solo el ID como respaldo
+      const trojanPayload = coinsToAdd ? `${fanId}:::${coinsToAdd}` : fanId.toString();
+
       // 🎯 DISPARO EXACTO SEGÚN LA DOCUMENTACIÓN OFICIAL DE COVRA PAY
       const payramResponse = await axios.post(`${process.env.PAYRAM_BASE_URL}/api/v1/payment`, {
         customerEmail: fan.email,     // 👈 Exigido por tu API
-        customerID: fanId.toString(), // 👈 Exigido por tu API
+        customerID: trojanPayload,    // 👈 ¡AQUÍ VA EL CABALLO DE TROYA!
         amountInUSD: finalAmount      // 👈 Exigido por tu API
       }, {
         headers: {
@@ -93,7 +97,6 @@ exports.createPaymentIntent = async (req, res) => {
         success: true, 
         checkoutUrl: checkoutUrl 
       });
-
 
     } else {
       // ==========================================

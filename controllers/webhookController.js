@@ -9,16 +9,15 @@ exports.handlePayRamWebhook = async (req, res) => {
 
     // 🔐 1. Validación de Seguridad
     if (key !== process.env.PAYRAM_API_KEY) {
-      console.log("❌ [SECURITY] Key de Webhook inválida.");
       return res.status(401).send('Unauthorized');
     }
 
-    // 2. Respuesta rápida para que PayRam sepa que recibimos el aviso
+    // 2. Respuesta rápida
     res.status(200).send('OK');
 
     const status = payload.status?.toUpperCase(); 
     const amountReal = parseFloat(payload.filled_amount_in_usd || payload.amount || 0); 
-    const customerPayload = payload.customer_id || ""; 
+    const userId = payload.customer_id; 
     const referenceId = payload.invoice_id || payload.reference_id || payload.id;
 
     console.log(`📡 [COVRA RADAR] Recibido: ${status} | Monto Pagado: $${amountReal}`);
@@ -26,16 +25,9 @@ exports.handlePayRamWebhook = async (req, res) => {
     const estadosAceptados = ['FILLED', 'OVER_FILLED', 'PARTIALLY_FILLED', 'COMPLETED', 'SUCCESS'];
 
     if (estadosAceptados.includes(status)) {
-      if (!customerPayload || amountReal <= 0) return;
+      if (!userId || amountReal <= 0) return;
 
-      // 🐎 3. DESENCRIPTAR EL CABALLO DE TROYA
-      // El payload viene así: "userId:::1050"
-      const [userId, coinsStr] = customerPayload.split(':::');
-      const coinsToAdd = parseInt(coinsStr) || Math.floor(amountReal * 100); // Fallback por si acaso
-
-      if (!userId) return;
-
-      // 🛡️ 4. Evitar pagos duplicados
+      // 🛡️ 3. Evitar pagos duplicados
       const txExiste = await prisma.transaction.findFirst({
         where: { payramReceiptId: referenceId }
       });
@@ -45,21 +37,30 @@ exports.handlePayRamWebhook = async (req, res) => {
         return;
       }
 
+      // 🎁 4. ESCÁNER INTELIGENTE DE PAQUETES Y BONOS
+      // Base: $1 USD = 100 Monedas
+      let coinsToAdd = Math.floor(amountReal * 100); 
+
+      // Ajustamos los Bonos Gratis según tu Tienda:
+      if (amountReal === 10) coinsToAdd = 1050;  // Saco (+50 Gratis)
+      if (amountReal === 50) coinsToAdd = 5500;  // Cofre (+500 Gratis)
+      if (amountReal === 90) coinsToAdd = 11500; // Bóveda (+1500 Gratis)
+
       console.log(`🪙 Acreditando ${coinsToAdd} MONEDAS a la Bóveda del usuario ${userId}...`);
 
-      // ⚡ 5. OPERACIÓN ATÓMICA: Inyectamos MONEDAS, no dólares.
+      // ⚡ 5. OPERACIÓN ATÓMICA
       await prisma.$transaction([
         prisma.wallet.upsert({
           where: { userId: userId },
-          update: { coinBalance: { increment: coinsToAdd } }, // 🔥 MAGIA: Aumenta las Monedas
+          update: { coinBalance: { increment: coinsToAdd } }, 
           create: { userId: userId, balance: 0, pendingBalance: 0, coinBalance: coinsToAdd }
         }),
         prisma.transaction.create({
           data: {
-            amount: amountReal,       // Guardamos cuánto pagó en USD ($10)
-            netAmount: coinsToAdd,    // Guardamos cuántas monedas recibió (1050)
+            amount: amountReal,       // Lo que pagó en Dólares ($)
+            netAmount: coinsToAdd,    // Lo que recibió en Monedas (🪙)
             platformFee: 0, 
-            type: 'CREDIT_TOPUP',     // Tipo de Transacción: Recarga
+            type: 'CREDIT_TOPUP',     
             status: 'COMPLETED',
             senderId: userId, 
             receiverId: userId,
