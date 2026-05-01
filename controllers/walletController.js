@@ -198,20 +198,23 @@ exports.buyCoins = async (req, res) => {
     const userId = req.user.userId;
     const { amountUsd, coinsToAdd } = req.body;
 
-    if (!amountUsd) {
+    // 🔥 LA CURA: Forzamos matemáticamente a que sea un Número Decimal (Igual que en tu código viejo)
+    let finalAmount = parseFloat(amountUsd);
+
+    if (!finalAmount || finalAmount <= 0 || !coinsToAdd) {
       return res.status(400).json({ error: 'Datos del paquete inválidos.' });
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
 
-    // ⚡ CONEXIÓN A COVRA PAY (CON EL ID LIMPIO Y PURO)
+    // ⚡ CONEXIÓN A COVRA PAY
     const covraUrl = `${process.env.PAYRAM_BASE_URL}/api/v1/payment`; 
 
     const payramResponse = await axios.post(covraUrl, {
       customerEmail: user.email,     
-      customerID: userId.toString(), // 👈 Cero trucos. ID limpio para evitar el 404.
-      amountInUSD: amountUsd         
+      customerID: userId.toString(), 
+      amountInUSD: finalAmount       // 👈 AHORA ES UN NÚMERO PURO, CERO TEXTO
     }, {
       headers: { 
         'API-Key': process.env.PAYRAM_API_KEY, 
@@ -226,7 +229,8 @@ exports.buyCoins = async (req, res) => {
       throw new Error("Covra Pay no devolvió una URL de checkout válida.");
     }
 
-    res.status(200).json({ checkoutUrl });
+    // Devolvemos el success: true y la url tal como lo hacía tu código anterior
+    res.status(200).json({ success: true, checkoutUrl });
 
   } catch (error) {
     console.error("❌ Error generando orden CovraPay:", error.message);
