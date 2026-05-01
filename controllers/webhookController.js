@@ -12,15 +12,16 @@ exports.handlePayRamWebhook = async (req, res) => {
       return res.status(401).send('Unauthorized');
     }
 
-    // 2. Respuesta rápida
+    // 2. Respuesta rápida a Covra Pay
     res.status(200).send('OK');
 
     const status = payload.status?.toUpperCase(); 
+    // Capturamos el monto EXACTO que llegó en cripto (Ej: 9.85 o 10.04)
     const amountReal = parseFloat(payload.filled_amount_in_usd || payload.amount || 0); 
     const userId = payload.customer_id; 
     const referenceId = payload.invoice_id || payload.reference_id || payload.id;
 
-    console.log(`📡 [COVRA RADAR] Recibido: ${status} | Monto Pagado: $${amountReal}`);
+    console.log(`📡 [COVRA RADAR] Recibido: ${status} | Monto Pagado Real: $${amountReal}`);
 
     const estadosAceptados = ['FILLED', 'OVER_FILLED', 'PARTIALLY_FILLED', 'COMPLETED', 'SUCCESS'];
 
@@ -37,16 +38,31 @@ exports.handlePayRamWebhook = async (req, res) => {
         return;
       }
 
-      // 🎁 4. ESCÁNER INTELIGENTE DE PAQUETES Y BONOS
-      // Base: $1 USD = 100 Monedas
-      let coinsToAdd = Math.floor(amountReal * 100); 
+      // ========================================================
+      // 🎁 4. ESCÁNER INTELIGENTE (TOLERANCIA CRIPTO)
+      // ========================================================
+      
+      // Paso A: Convertimos cada centavo real a monedas (Ej: $9.85 = 985 monedas)
+      let baseCoins = Math.floor(amountReal * 100); 
+      let bonusCoins = 0;
 
-      // Ajustamos los Bonos Gratis según tu Tienda:
-      if (amountReal === 10) coinsToAdd = 1050;  // Saco (+50 Gratis)
-      if (amountReal === 50) coinsToAdd = 5500;  // Cofre (+500 Gratis)
-      if (amountReal === 90) coinsToAdd = 11500; // Bóveda (+1500 Gratis)
+      // Paso B: Detectamos qué paquete intentó comprar usando un margen de tolerancia (± 15%)
+      if (amountReal >= 8.50 && amountReal <= 11.50) {
+        bonusCoins = 50;     // Detectó paquete "Saco". Bono de +50
+      } 
+      else if (amountReal >= 42.00 && amountReal <= 58.00) {
+        bonusCoins = 500;    // Detectó paquete "Cofre". Bono de +500
+      } 
+      else if (amountReal >= 78.00 && amountReal <= 102.00) {
+        bonusCoins = 1500;   // Detectó paquete "Bóveda". Bono de +1500
+      }
 
-      console.log(`🪙 Acreditando ${coinsToAdd} MONEDAS a la Bóveda del usuario ${userId}...`);
+      // Paso C: Suma final exacta
+      const coinsToAdd = baseCoins + bonusCoins;
+
+      console.log(`🪙 Base: ${baseCoins} + Bono: ${bonusCoins} = Acreditando ${coinsToAdd} MONEDAS a ${userId}...`);
+
+      // ========================================================
 
       // ⚡ 5. OPERACIÓN ATÓMICA
       await prisma.$transaction([
@@ -57,14 +73,14 @@ exports.handlePayRamWebhook = async (req, res) => {
         }),
         prisma.transaction.create({
           data: {
-            amount: amountReal,       // Lo que pagó en Dólares ($)
-            netAmount: coinsToAdd,    // Lo que recibió en Monedas (🪙)
+            amount: amountReal,       // Registramos el dólar exacto que ingresó ($9.85)
+            netAmount: coinsToAdd,    // Registramos las monedas exactas entregadas (1035 🪙)
             platformFee: 0, 
             type: 'CREDIT_TOPUP',     
             status: 'COMPLETED',
             senderId: userId, 
             receiverId: userId,
-            attachedMessage: `Compra Cripto: Paquete de ${coinsToAdd} Monedas 🪙`,
+            attachedMessage: `Compra Cripto: Recarga de ${coinsToAdd} Monedas 🪙`,
             payramReceiptId: referenceId
           }
         })

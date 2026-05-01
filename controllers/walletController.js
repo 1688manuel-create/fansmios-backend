@@ -196,6 +196,7 @@ exports.updateCryptoAddress = async (req, res) => {
 exports.buyCoins = async (req, res) => {
   try {
     const userId = req.user.userId;
+    console.log("🔥 ATENCIÓN: MI ID DE USUARIO ES --->", userId); // <-- Agrega esta línea
     const { amountUsd, coinsToAdd } = req.body;
 
     // 🔥 LA CURA: Forzamos matemáticamente a que sea un Número Decimal (Igual que en tu código viejo)
