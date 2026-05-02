@@ -23,12 +23,6 @@ enum UserStatus {
   SHADOWBANNED
 }
 
-enum ReportStatus {
-  PENDING
-  RESOLVED
-  DISMISSED
-}
-
 enum SubscriptionStatus {
   ACTIVE
   CANCELED
@@ -45,7 +39,7 @@ enum TransactionType {
   LIVE_TICKET 
   PAYOUT 
   PROMOTION
-  CREDIT_TOPUP // 👈 ¡NUEVO! Añade esta línea
+  CREDIT_TOPUP 
 }
 
 enum TransactionStatus {
@@ -119,7 +113,6 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // 🔥 NUEVO: Reloj de inactividad
   lastLoginAt   DateTime @default(now())
 
   language String @default("es")
@@ -223,7 +216,6 @@ model CreatorProfile {
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // 🔥 NUEVOS CAMPOS: La telemetría de la IA para el Modo Dios
   kycRiskScore        Float?
   kycFaceMatch        Float?
 
@@ -298,13 +290,12 @@ model Like {
   @@unique([userId, postId])
 }
 
-// 🔥 BILLETERA FUSIONADA: Dólares para Creadores, Monedas para Fans
+// 🔥 BILLETERA PURA EN DÓLARES
 model Wallet {
   id              String   @id @default(uuid())
   userId          String   @unique
-  balance         Float    @default(0.0) // El dinero real (USD) que el Creador puede retirar
-  pendingBalance  Float    @default(0.0) 
-  coinBalance     Int      @default(0)   // 🔥 NUEVO: Las monedas virtuales que el Fan gasta
+  balance         Float    @default(0.0) // USD disponible
+  pendingBalance  Float    @default(0.0) // USD en espera
   cryptoAddress   String? 
   cryptoNetwork   String? 
   createdAt       DateTime @default(now())
@@ -313,14 +304,14 @@ model Wallet {
 }
 
 model Subscription {
-  id             String             @id @default(uuid())
-  fanId          String
-  creatorId      String
-  status         SubscriptionStatus @default(ACTIVE)
-  price          Float
-  startDate      DateTime           @default(now())
-  endDate        DateTime 
-  reminderSent   Boolean @default(false) 
+  id               String             @id @default(uuid())
+  fanId            String
+  creatorId        String
+  status           SubscriptionStatus @default(ACTIVE)
+  price            Float
+  startDate        DateTime           @default(now())
+  endDate          DateTime 
+  reminderSent     Boolean @default(false) 
   fan       User @relation("FanSubscriptions", fields: [fanId], references: [id], onDelete: Cascade)
   creator   User @relation("CreatorSubscribers", fields: [creatorId], references: [id], onDelete: Cascade)
   @@unique([fanId, creatorId])
@@ -358,12 +349,6 @@ model Withdrawal {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   creator    User     @relation("CreatorWithdrawals", fields: [creatorId], references: [id], onDelete: Cascade)
-}
-
-model PlatformSetting {
-  id                 String   @id @default("global_settings")
-  platformFeePercent Float    @default(20.0)
-  updatedAt          DateTime @updatedAt
 }
 
 model Report {
@@ -584,16 +569,13 @@ model Coupon {
 // ==========================================
 model PlatformSettings {
   id                 String   @id @default(uuid())
-  feeSubscription    Float    @default(20.0) // 20% para suscripciones
-  feePPV             Float    @default(20.0) // 20% para posts/mensajes
-  feeTips            Float    @default(20.0) // 20% para propinas
-  feeLive            Float    @default(30.0) // 30% para transmisiones en vivo
-  feeWithdrawalStd   Float    @default(2.0)  // 2% por retiro normal
-  feeWithdrawalExp   Float    @default(5.0)  // 5% por retiro rápido
-  
-  // 🔥 NUEVO: Porcentaje de ganancia para el sistema de Referidos (Ej: 5%)
+  feeSubscription    Float    @default(20.0) 
+  feePPV             Float    @default(20.0) 
+  feeTips            Float    @default(20.0) 
+  feeLive            Float    @default(30.0) 
+  feeWithdrawalStd   Float    @default(2.0)  
+  feeWithdrawalExp   Float    @default(5.0)  
   feeReferral        Float    @default(5.0)  
-
   updatedAt          DateTime @updatedAt
 }
 
@@ -612,14 +594,11 @@ model Series {
   title       String
   description String?  @db.Text
   price       Float    @default(0)
-  thumbnail   String?  // URL de la portada en Cloudinary
-  
+  thumbnail   String?  
   creatorId   String
   creator     User     @relation("UserSeries", fields: [creatorId], references: [id], onDelete: Cascade)
-  
   episodes    SeriesEpisode[]
   purchases   SeriesPurchase[] 
-  
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -628,29 +607,21 @@ model SeriesEpisode {
   id          String   @id @default(uuid())
   title       String
   description String?  @db.Text
-  mediaUrl    String   // El video del capítulo en Cloudinary
-  order       Int      @default(0) // Para ordenar: Cap 1, Cap 2, Cap 3...
-  
+  mediaUrl    String   
+  order       Int      @default(0) 
   seriesId    String
   series      Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
-  
   createdAt   DateTime @default(now())
 }
 
-// Registro de quién compró qué curso (Para desbloquearles los videos)
 model SeriesPurchase {
   id          String   @id @default(uuid())
   pricePaid   Float
-  
   seriesId    String
   series      Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
-  
   fanId       String
   fan         User     @relation("FanSeriesPurchases", fields: [fanId], references: [id], onDelete: Cascade)
-  
   createdAt   DateTime @default(now())
-
-  // Un fan solo puede comprar el mismo curso una vez
   @@unique([seriesId, fanId]) 
 }
 
@@ -659,32 +630,19 @@ model PlatformWithdrawal {
   adminId       String
   admin         User     @relation(fields: [adminId], references: [id])
   amount        Float
-  cryptoAddress String?  // Tu wallet personal a donde mandaste el dinero
-  notes         String?  // Ej: "Retiro para pagar servidores"
+  cryptoAddress String?  
+  notes         String?  
   createdAt     DateTime @default(now())
 }
 
 // ==========================================
-// 🪙 ECONOMÍA INFINITA: REGALOS Y PAQUETES
+// 💎 REGALOS EN DÓLARES REALES
 // ==========================================
-
-// Los regalos ya no cuestan dólares, cuestan Monedas.
 model Gift {
   id          String   @id @default(uuid())
   name        String
-  icon        String   // Aquí luego pondremos la URL del Lottie/GIF
-  coinPrice   Int      // 🔥 CAMBIADO: Precio en monedas (ej: 100)
-  tier        String   @default("BASIC") // 🔥 NUEVO: 'BASIC', 'EPIC', 'LEGENDARY'
-  createdAt   DateTime @default(now())
-}
-
-// NUEVA TABLA: PAQUETES DE MONEDAS (El producto de tu tienda)
-model CoinPackage {
-  id          String   @id @default(uuid())
-  name        String   // ej: "Puñado de Monedas", "Cofre de Monedas"
-  coins       Int      // ej: 100, 500, 1000
-  priceUsd    Float    // ej: 1.00, 4.50, 9.00 (El fan paga menos si compra más)
-  bonus       Int      @default(0) // ej: +50 monedas de regalo para incentivar compras grandes
-  isActive    Boolean  @default(true)
+  icon        String   
+  price       Float    
+  tier        String   @default("BASIC") 
   createdAt   DateTime @default(now())
 }

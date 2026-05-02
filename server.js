@@ -8,19 +8,17 @@ const Sentry = require('@sentry/node');
 const http = require('http');
 const { Server } = require('socket.io'); 
 
-// 🔥 NUEVO: El Cadenero VIP de LiveKit
+// 🔥 EL CADENERO VIP DE LIVEKIT
 const { AccessToken } = require('livekit-server-sdk');
-// Importamos al guardia de seguridad para leer los tokens
 const { verifyToken } = require('./middlewares/authMiddleware');
 
-// Importación de Tareas en Segundo Plano (Cron Jobs)
+// Tareas en Segundo Plano (Cron Jobs)
 const { startSubscriptionCron } = require('./utils/subscriptionCron'); 
 const startBalanceReleaser = require('./cron/balanceReleaser');
 const startAccountGuardian = require('./cron/accountGuardian'); 
 const cron = require('node-cron'); 
 const postController = require('./controllers/postController');
 
-// Importamos las rutas
 const seriesRoutes = require('./routes/seriesRoutes');
 
 // ==========================================
@@ -33,14 +31,14 @@ Sentry.init({
 
 const app = express();
 
-// 🔥 CRÍTICO: Confiar en el proxy de Coolify para que el Escudo Anti-Bots no bloquee usuarios reales
+// Confiar en el proxy para el Escudo Anti-Bots
 app.set('trust proxy', 1);
 
 const server = http.createServer(app); 
 const PORT = process.env.PORT || 5000;
 
 // ==========================================
-// 2. SISTEMA MAESTRO DE WEBSOCKETS (TIEMPO REAL)
+// 2. SISTEMA MAESTRO DE WEBSOCKETS (USD READY)
 // ==========================================
 const io = new Server(server, {
   cors: {
@@ -56,10 +54,11 @@ try {
   }
   console.log("✅ Antena de Chat Privado conectada.");
 } catch (error) {
-  console.log("⚠️ Aviso: Antena de Chat requiere revisión, pero el servidor sigue vivo.");
+  console.log("⚠️ Aviso: Antena de Chat requiere revisión.");
 }
 
 try {
+  // Aquí se carga tu liveSocket.js que ya limpiamos de monedas
   require('./sockets/liveSocket')(io);
   console.log("✅ Antena de Live Streaming conectada.");
 } catch (error) {
@@ -67,14 +66,11 @@ try {
 }
 
 // ==========================================
-// 3. MIDDLEWARES GLOBALES (El Filtro)
+// 3. MIDDLEWARES GLOBALES
 // ==========================================
 app.use(cors());
-
-// 🚀 AMPLIAMOS EL LÍMITE A 50MB PARA RECIBIR IMÁGENES EN BASE64
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==========================================
@@ -87,10 +83,10 @@ const authLimiter = rateLimit({
 });
 
 // ==========================================
-// 5. ENRUTADOR PRINCIPAL
+// 5. ENRUTADOR PRINCIPAL (ARQUITECTURA USD)
 // ==========================================
 app.get('/', (req, res) => {
-  res.json({ message: 'Motor Unicornio funcionando y blindado 🚀' });
+  res.json({ message: 'Motor Unicornio funcionando y blindado en Dólares 🚀' });
 });
 
 app.use('/api/auth', authLimiter, require('./routes/authRoutes'));
@@ -103,12 +99,11 @@ app.use('/api/explore', require('./routes/exploreRoutes'));
 app.use('/api/discover', require('./routes/discoverRoutes'));
 app.use('/api/bookmarks', require('./routes/bookmarkRoutes'));
 
+// Nucleo Financiero (Limpios de Coins)
 app.use('/api/payments', require('./routes/paymentRoutes'));
 app.use('/api/finance', require('./routes/monetizationRoutes'));
 app.use('/api/wallet', require('./routes/walletRoutes')); 
-// 📡 Antena de Webhooks de PayRam
 app.use('/api/webhooks', require('./routes/webhookRoutes'));
-
 
 app.use('/api/bundles', require('./routes/bundleRoutes'));
 app.use('/api/coupons', require('./routes/couponRoutes'));
@@ -126,21 +121,22 @@ app.use('/api/settings', require('./routes/settingsRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
 app.use('/api/referrals', require('./routes/referralRoutes'));
-app.use('/api/stats', require('./routes/statsRoutes')); // ✅ Ruta de stats única y limpia
+app.use('/api/stats', require('./routes/statsRoutes')); 
 app.use('/api/profile/kyc', require('./routes/kycRoutes'));
 app.use('/api/2fa', require('./routes/auth2faRoutes'));
 app.use('/api/series', seriesRoutes);
 
 
-// 🔥 NUEVO: RUTA PARA EL BOLETO DE LIVEKIT BLINDADA PARA FANTASMAS
+// 🔥 RUTA PARA EL BOLETO DE LIVEKIT (MODO INVISIBLE PARA ADMINS)
 app.post('/api/livekit/token', verifyToken, async (req, res) => {
   try {
     const { roomName, participantName, isCreator } = req.body;
 
-    // 1. Detectamos si el usuario real es el Admin Supremo
-    const isAdmin = String(req.user?.role).toUpperCase() === 'ADMIN';
+    // Validación de seguridad para evitar caídas del servidor
+    const userRole = req.user?.role ? String(req.user.role).toUpperCase() : 'FAN';
+    const isAdmin = userRole === 'ADMIN';
 
-    // 2. Si es Admin, le quitamos el poder de prender su cámara por error
+    // Si es Admin, le quitamos el poder de publicar video (Modo Fantasma)
     const canPublishVideo = isCreator && !isAdmin;
 
     const at = new AccessToken(
@@ -157,7 +153,7 @@ app.post('/api/livekit/token', verifyToken, async (req, res) => {
       room: roomName,
       canPublish: canPublishVideo, 
       canSubscribe: true,    
-      hidden: isAdmin // 👻 ¡MAGIA! LA CAPA DE INVISIBILIDAD ABSOLUTA EN EL VIDEO
+      hidden: isAdmin // Invisibility cloak activo
     });
 
     const token = await at.toJwt();
@@ -170,20 +166,20 @@ app.post('/api/livekit/token', verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// 6. TRABAJADORES Y MANEJO DE ERRORES
+// 6. TRABAJADORES Y CRON JOBS
 // ==========================================
 try { require('./workers/broadcastWorker'); } catch(e) {}
 
-// 🔥 SENTRY DEBE IR EXACTAMENTE AQUÍ (Después de las rutas)
+// Manejador de Errores de Sentry
 Sentry.setupExpressErrorHandler(app);
 
-// 🤖 ENCENDIDO DE CRON JOBS (ROBOTS EN SEGUNDO PLANO)
+// Robots en Segundo Plano
 startSubscriptionCron(); 
 startBalanceReleaser();
 startAccountGuardian(); 
-console.log('🤖 Motores de Automatización (Suscripciones y Saldos) Activados.');
+console.log('🤖 Motores de Automatización Activados.');
 
-// 🔥 EL PERRO GUARDIÁN: Patrulla Anti-IA todos los días a las 3:00 AM
+// PERRO GUARDIÁN: Patrulla Anti-IA 3:00 AM
 cron.schedule('0 3 * * *', async () => {
   console.log('🐕 [CRON] Despertando al Perro Guardián Anti-IA...');
   
@@ -202,17 +198,17 @@ cron.schedule('0 3 * * *', async () => {
     if (typeof postController.scanExistingPostsForAI === 'function') {
       await postController.scanExistingPostsForAI(mockReq, mockRes);
     } else {
-      console.log('⚠️ [CRON] La función scanExistingPostsForAI no se encontró en postController.');
+      console.log('⚠️ [CRON] La función scanExistingPostsForAI no se encontró.');
     }
   } catch (error) {
-    console.error('❌ [CRON] Error durante el patrullaje Anti-IA:', error);
+    console.error('❌ [CRON] Error durante el patrullaje:', error);
   }
 });
-console.log('⏳ Reloj Biológico (Cron) activado. El Perro Guardián patrullará a las 3:00 AM.');
 
 // ==========================================
-// 7. ENCENDIDO DEL SERVIDOR
+// 7. ENCENDIDO FINAL
 // ==========================================
 server.listen(PORT, () => {
-  console.log(`🚀 Servidor HTTP y WebSockets corriendo en el puerto ${PORT}`);
+  console.log(`🚀 SERVIDOR FANSMIOS OPERANDO EN PUERTO ${PORT}`);
+  console.log(`💵 ECONOMÍA: USD / CRIPTO (Sin Monedas Virtuales)`);
 });
