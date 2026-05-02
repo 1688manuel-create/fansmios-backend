@@ -12,7 +12,7 @@ const { verifyToken } = require('../middlewares/authMiddleware');
  * 🚀 Generador Maestro de Órdenes (Suscripciones, PPV, Tips, Bundles y Recargas)
  * * Esta es la ruta central del imperio:
  * - Si es una RECARGA ('CREDIT_TOPUP'): Genera un link externo hacia Covra Pay / PayRam.
- * - Si es un PAGO INTERNO (Sub, PPV): Procesa el movimiento atómico de saldo entre bóvedas.
+ * - Si es un PAGO INTERNO (Sub, PPV): Procesa el movimiento atómico de saldo entre bóvedas en DÓLARES.
  */
 router.post('/create-intent', verifyToken, paymentController.createPaymentIntent);
 

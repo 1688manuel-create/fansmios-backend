@@ -39,28 +39,12 @@ exports.handlePayRamWebhook = async (req, res) => {
       }
 
       // ========================================================
-      // 🎁 4. ESCÁNER INTELIGENTE (TOLERANCIA CRIPTO)
+      // 💵 4. ACREDITACIÓN DIRECTA EN DÓLARES (USD/USDC)
       // ========================================================
       
-      // Paso A: Convertimos cada centavo real a monedas (Ej: $9.85 = 985 monedas)
-      let baseCoins = Math.floor(amountReal * 100); 
-      let bonusCoins = 0;
+      const usdToAdd = amountReal; 
 
-      // Paso B: Detectamos qué paquete intentó comprar usando un margen de tolerancia (± 15%)
-      if (amountReal >= 8.50 && amountReal <= 11.50) {
-        bonusCoins = 50;     // Detectó paquete "Saco". Bono de +50
-      } 
-      else if (amountReal >= 42.00 && amountReal <= 58.00) {
-        bonusCoins = 500;    // Detectó paquete "Cofre". Bono de +500
-      } 
-      else if (amountReal >= 78.00 && amountReal <= 102.00) {
-        bonusCoins = 1500;   // Detectó paquete "Bóveda". Bono de +1500
-      }
-
-      // Paso C: Suma final exacta
-      const coinsToAdd = baseCoins + bonusCoins;
-
-      console.log(`🪙 Base: ${baseCoins} + Bono: ${bonusCoins} = Acreditando ${coinsToAdd} MONEDAS a ${userId}...`);
+      console.log(`💵 Recarga directa: Acreditando $${usdToAdd} USD a la bóveda del usuario ${userId}...`);
 
       // ========================================================
 
@@ -68,25 +52,25 @@ exports.handlePayRamWebhook = async (req, res) => {
       await prisma.$transaction([
         prisma.wallet.upsert({
           where: { userId: userId },
-          update: { coinBalance: { increment: coinsToAdd } }, 
-          create: { userId: userId, balance: 0, pendingBalance: 0, coinBalance: coinsToAdd }
+          update: { balance: { increment: usdToAdd } }, // 🔥 Sumamos DÓLARES directos
+          create: { userId: userId, balance: usdToAdd, pendingBalance: 0, coinBalance: 0 }
         }),
         prisma.transaction.create({
           data: {
             amount: amountReal,       // Registramos el dólar exacto que ingresó ($9.85)
-            netAmount: coinsToAdd,    // Registramos las monedas exactas entregadas (1035 🪙)
+            netAmount: usdToAdd,      // Registramos los dólares exactos entregados
             platformFee: 0, 
             type: 'CREDIT_TOPUP',     
             status: 'COMPLETED',
             senderId: userId, 
             receiverId: userId,
-            attachedMessage: `Compra Cripto: Recarga de ${coinsToAdd} Monedas 🪙`,
+            attachedMessage: `Recarga de Bóveda: $${usdToAdd} USD 💵`,
             payramReceiptId: referenceId
           }
         })
       ]);
 
-      console.log(`✅ ¡ÉXITO TOTAL! ${coinsToAdd} Monedas entregadas al Fan.`);
+      console.log(`✅ ¡ÉXITO TOTAL! $${usdToAdd} USD entregados al Fan.`);
     }
 
   } catch (error) {

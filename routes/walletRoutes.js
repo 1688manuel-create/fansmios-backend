@@ -18,7 +18,7 @@ router.get('/dashboard', verifyToken, walletController.getDashboard);
 
 router.put('/update-crypto', verifyToken, walletController.updateCryptoAddress);
 
-// 🪙 NUEVO: RUTA PARA COMPRAR PAQUETES DE MONEDAS
+// 💵 NUEVO: RUTA PARA RECARGAR DÓLARES A LA BÓVEDA (COVRA PAY)
 router.post('/buy-coins', verifyToken, walletController.buyCoins);
 
 module.exports = router;

@@ -2,7 +2,7 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const speakeasy = require('speakeasy'); 
-const axios = require('axios'); // 🔥 NUEVO: Para conectar con PayRam
+const axios = require('axios'); // 🔥 Para conectar con PayRam
 
 exports.getWallet = async (req, res) => {
   try {
@@ -163,7 +163,7 @@ exports.getDashboard = async (req, res) => {
       wallet: {
         balance: displayBalance,
         pendingBalance: wallet?.pendingBalance || 0,
-        coinBalance: wallet?.coinBalance || 0, // 🔥 Añadimos el saldo de monedas al feed
+        coinBalance: wallet?.coinBalance || 0, 
         cryptoAddress: wallet?.cryptoAddress || null
       },
       totalEarnedHistorial, withdrawalHistory, recentTransactions: mappedTransactions
@@ -191,19 +191,21 @@ exports.updateCryptoAddress = async (req, res) => {
 };
 
 // ==========================================
-// 🪙 GENERAR ORDEN DE COMPRA DE MONEDAS (COVRA PAY)
+// 💵 GENERAR ORDEN DE RECARGA DE BÓVEDA EN DÓLARES (COVRA PAY)
 // ==========================================
 exports.buyCoins = async (req, res) => {
   try {
     const userId = req.user.userId;
-    console.log("🔥 ATENCIÓN: MI ID DE USUARIO ES --->", userId); // <-- Agrega esta línea
-    const { amountUsd, coinsToAdd } = req.body;
+    console.log("🔥 ATENCIÓN: MI ID DE USUARIO ES --->", userId);
+    
+    // 🔥 Solo recibimos los dólares (amountUsd), ignoramos monedas
+    const { amountUsd } = req.body;
 
-    // 🔥 LA CURA: Forzamos matemáticamente a que sea un Número Decimal (Igual que en tu código viejo)
     let finalAmount = parseFloat(amountUsd);
 
-    if (!finalAmount || finalAmount <= 0 || !coinsToAdd) {
-      return res.status(400).json({ error: 'Datos del paquete inválidos.' });
+    // Validación pura de dólares (Sin coinsToAdd)
+    if (!finalAmount || finalAmount <= 0) {
+      return res.status(400).json({ error: 'Monto de recarga inválido.' });
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -214,8 +216,8 @@ exports.buyCoins = async (req, res) => {
 
     const payramResponse = await axios.post(covraUrl, {
       customerEmail: user.email,     
-      customerID: userId.toString(), 
-      amountInUSD: finalAmount       // 👈 AHORA ES UN NÚMERO PURO, CERO TEXTO
+      customerID: userId.toString(), // 👈 Mandamos el ID limpio
+      amountInUSD: finalAmount       // 👈 El número puro en dólares
     }, {
       headers: { 
         'API-Key': process.env.PAYRAM_API_KEY, 
@@ -230,7 +232,6 @@ exports.buyCoins = async (req, res) => {
       throw new Error("Covra Pay no devolvió una URL de checkout válida.");
     }
 
-    // Devolvemos el success: true y la url tal como lo hacía tu código anterior
     res.status(200).json({ success: true, checkoutUrl });
 
   } catch (error) {

@@ -63,15 +63,15 @@ module.exports = (io) => {
     });
 
     // ==========================================
-    // 🔥 2. EL REPETIDOR DE SEÑAL (CASA DE CAMBIO: MONEDAS A DÓLARES)
+    // 🔥 2. PROCESADOR DE REGALOS (100% DÓLARES / USD)
     // ==========================================
     socket.on('broadcastMessage', async (messageData) => {
-      // Nota: El frontend ahora debe mandar la cantidad de MONEDAS en el campo 'amount'
-      const { streamId, senderId, amount: coinsToDeduct, isDonation, text } = messageData;
+      // El frontend ahora manda la cantidad exacta en DÓLARES en el campo 'amount'
+      const { streamId, senderId, amount: amountUsd, isDonation, text } = messageData;
 
       try {
-        if (isDonation && coinsToDeduct > 0) {
-          console.log(`🪙 Procesando Regalo de ${coinsToDeduct} Monedas...`);
+        if (isDonation && amountUsd > 0) {
+          console.log(`💵 Procesando Regalo de $${amountUsd} USD...`);
 
           // 🛡️ TRANSACCIÓN ATÓMICA DE GRADO INDUSTRIAL
           const giftResult = await prisma.$transaction(async (tx) => {
@@ -81,8 +81,8 @@ module.exports = (io) => {
               where: { userId: senderId }
             });
 
-            // 🛑 EL FILTRO: Verificamos el saldo en MONEDAS (coinBalance)
-            if (!senderWallet || senderWallet.coinBalance < coinsToDeduct) {
+            // 🛑 EL FILTRO: Verificamos el saldo en DÓLARES (balance)
+            if (!senderWallet || senderWallet.balance < amountUsd) {
               throw new Error("SALDO_INSUFICIENTE");
             }
 
@@ -94,16 +94,14 @@ module.exports = (io) => {
 
             if (!stream) throw new Error("STREAM_NO_ENCONTRADO");
 
-            // 💰 3. LA CASA DE CAMBIO: Convertimos Monedas a Dólares
-            // Tasa de conversión: 100 Monedas = $1.00 USD
-            const usdValue = coinsToDeduct / 100;
-            const fee = usdValue * 0.20; // 20% para la plataforma
-            const netAmount = usdValue - fee; // Lo que se lleva el creador
+            // 💰 3. PURA MATEMÁTICA FINANCIERA (Sin conversiones)
+            const fee = amountUsd * 0.20; // 20% para la plataforma
+            const netAmount = amountUsd - fee; // Lo que se lleva el creador
 
-            // 4A. RESTAMOS MONEDAS al fan
+            // 4A. RESTAMOS DÓLARES al fan
             await tx.wallet.update({
               where: { userId: senderId },
-              data: { coinBalance: { decrement: coinsToDeduct } }
+              data: { balance: { decrement: amountUsd } }
             });
 
             // 4B. SUMAMOS DÓLARES al creador
@@ -112,26 +110,26 @@ module.exports = (io) => {
               data: { balance: { increment: netAmount } }
             });
 
-            // 5. REGISTRAMOS LA TRANSACCIÓN LEGALMENTE (Ajustado a tu Schema)
+            // 5. REGISTRAMOS LA TRANSACCIÓN LEGALMENTE
             await tx.transaction.create({
               data: {
                 senderId,
                 receiverId: stream.creatorId,
-                amount: usdValue,       // Registramos el valor en USD
+                amount: amountUsd,      // Registramos el valor exacto en USD
                 platformFee: fee,       // Tu comisión en USD
                 netAmount: netAmount,   // Ganancia neta del creador en USD
                 type: 'TIP',            // En tu Enum es TIP (Propina)
                 status: 'COMPLETED',
-                attachedMessage: `Regalo en Vivo: ${text || 'Animación'} (${coinsToDeduct} Monedas)` 
+                attachedMessage: `Regalo en Vivo: ${text || 'Animación'} ($${amountUsd.toFixed(2)} USD)` 
               }
             });
 
-            return { success: true, usdValue };
+            return { success: true, amountUsd };
           });
 
           // Si todo salió bien, actualizamos la barra de meta en dólares
-          console.log(`💸 Lluvia exitosa. ${coinsToDeduct} Monedas convertidas a $${giftResult.usdValue} USD en sala ${streamId}`);
-          socket.to(streamId).emit('updateLiveGoal', { amount: giftResult.usdValue });
+          console.log(`💸 Lluvia exitosa. $${giftResult.amountUsd} USD procesados en sala ${streamId}`);
+          socket.to(streamId).emit('updateLiveGoal', { amount: giftResult.amountUsd });
         }
 
         // Emitimos la animación a toda la sala
@@ -139,8 +137,8 @@ module.exports = (io) => {
 
       } catch (error) {
         if (error.message === "SALDO_INSUFICIENTE") {
-          console.log(`❌ Intento de fraude: Usuario ${senderId} no tiene suficientes monedas.`);
-          socket.emit('error', { message: "No tienes suficientes monedas. ¡Recarga en la tienda! 🪙" });
+          console.log(`❌ Intento de fraude: Usuario ${senderId} no tiene suficiente saldo USD.`);
+          socket.emit('error', { message: "No tienes suficiente saldo en tu bóveda. ¡Recarga ahora! 💵" });
         } else {
           console.error("Error crítico en broadcastMessage:", error);
         }
@@ -159,7 +157,7 @@ module.exports = (io) => {
     // 🛡️ 4. SALTO VIP (BLOQUEAR SALA EN VIVO PERMANENTEMENTE)
     // ==========================================
     socket.on('activatePaywall', async ({ streamId, price }) => {
-      console.log(`🔒 El Creador bloqueó la sala ${streamId}. Nuevo Precio: $${price}`);
+      console.log(`🔒 El Creador bloqueó la sala ${streamId}. Nuevo Precio: $${price} USD`);
       
       try {
         await prisma.liveStream.update({
