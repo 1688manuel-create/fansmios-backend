@@ -248,8 +248,13 @@ exports.buyCoins = async (req, res) => {
 exports.downloadWithdrawalReceipt = async (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.user.id;
-    const userRole = req.user.role;
+    
+    // 🔥 CORRECCIÓN 1: Leemos correctamente el ID desde el token
+    const userId = req.user.userId; 
+
+    // 🔥 CORRECCIÓN 2: Buscamos tu rol directo en la base de datos para no fallar
+    const userRequesting = await prisma.user.findUnique({ where: { id: userId } });
+    const userRole = userRequesting ? userRequesting.role : 'USER';
 
     // 1. Buscamos el retiro en la base de datos
     const withdrawal = await prisma.withdrawal.findUnique({
