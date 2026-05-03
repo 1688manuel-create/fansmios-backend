@@ -86,16 +86,31 @@ module.exports = (io) => {
               throw new Error("SALDO_INSUFICIENTE");
             }
 
-            // 2. Buscamos quién es el creador
+            // 2. Buscamos quién es el creador y su perfil (Para leer si es VIP)
             const stream = await tx.liveStream.findUnique({
               where: { id: streamId },
-              select: { creatorId: true }
+              select: { 
+                creatorId: true,
+                creator: { select: { creatorProfile: true } }
+              }
             });
 
             if (!stream) throw new Error("STREAM_NO_ENCONTRADO");
 
-            // 💰 3. PURA MATEMÁTICA FINANCIERA (Sin conversiones)
-            const fee = amountUsd * 0.20; // 20% para la plataforma
+            // 👑 2.5 BUSCAMOS LA COMISIÓN GLOBAL SI NO ES VIP
+            const globalSettings = await tx.platformSetting.findFirst() || { feeTips: 20 };
+            
+            // 💰 3. PURA MATEMÁTICA FINANCIERA (Con soporte VIP)
+            let feePercent = globalSettings.feeTips / 100; // Por defecto el global
+            
+            // Si el creador tiene una tarifa VIP de Tips configurada por el Admin, la usamos
+            const creatorProfile = stream.creator?.creatorProfile;
+            if (creatorProfile && creatorProfile.customFeeTips !== null && creatorProfile.customFeeTips !== undefined) {
+              feePercent = creatorProfile.customFeeTips / 100;
+              console.log(`👑 ¡Alerta VIP! Cobrando solo el ${creatorProfile.customFeeTips}% a ${stream.creatorId}`);
+            }
+
+            const fee = amountUsd * feePercent; // Comisión calculada
             const netAmount = amountUsd - fee; // Lo que se lleva el creador
 
             // 4A. RESTAMOS DÓLARES al fan
