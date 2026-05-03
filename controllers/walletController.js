@@ -249,14 +249,10 @@ exports.downloadWithdrawalReceipt = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // 🔥 CORRECCIÓN 1: Leemos correctamente el ID desde el token
     const userId = req.user.userId; 
-
-    // 🔥 CORRECCIÓN 2: Buscamos tu rol directo en la base de datos para no fallar
     const userRequesting = await prisma.user.findUnique({ where: { id: userId } });
     const userRole = userRequesting ? userRequesting.role : 'USER';
 
-    // 1. Buscamos el retiro en la base de datos
     const withdrawal = await prisma.withdrawal.findUnique({
       where: { id },
       include: { creator: true }
@@ -266,98 +262,92 @@ exports.downloadWithdrawalReceipt = async (req, res) => {
       return res.status(404).json({ error: "Retiro no encontrado" });
     }
 
-    // 2. Blindaje: Solo el dueño del retiro o un ADMIN puede descargarlo
     if (withdrawal.creatorId !== userId && userRole !== 'ADMIN') {
       return res.status(403).json({ error: "Acceso denegado a este comprobante" });
     }
 
-    // 3. Configuramos las cabeceras HTTP para forzar la descarga de un PDF
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=Fansmio_Recibo_${withdrawal.id.substring(0,8)}.pdf`);
 
-    // 4. Inicializamos el documento PDF
     const doc = new PDFDocument({ margin: 50 });
-    
-    // Conectamos el documento directamente a la respuesta (stream)
     doc.pipe(res);
 
     // --- DISEÑO DEL PDF ---
-    
-    // 🎨 LOGO DE LA PÁGINA (OPCIONAL)
-    // Si tienes el logo guardado en la carpeta de tu backend, descomenta la siguiente línea y ajusta la ruta:
-    // doc.image('public/logo.png', { fit: [100, 100], align: 'center' }); 
+    // doc.image('public/logo.png', { fit: [100, 100], align: 'center' }); // Descomentar si tienes el logo
     // doc.moveDown(1);
 
-    // Título / Logo Texto
     doc.fontSize(22).font('Helvetica-Bold').fillColor('#22c55e').text('FANSMIO', { align: 'center' });
     doc.fontSize(12).font('Helvetica').fillColor('#000000').text('Comprobante de Liquidación (Payout Receipt)', { align: 'center' });
     doc.moveDown(2);
 
-    // Detalles del Emisor
     doc.fontSize(10).font('Helvetica-Bold').text('Detalles del Emisor:');
     doc.font('Helvetica').text('Fansmio Inc.');
     doc.text('https://fansmio.com');
     doc.moveDown();
 
-    // Detalles del Creador
     doc.font('Helvetica-Bold').text('Detalles del Beneficiario:');
     doc.font('Helvetica').text(`Usuario: @${withdrawal.creator.username || 'Creador'}`);
     doc.text(`ID de Plataforma: ${withdrawal.creatorId}`);
     doc.moveDown();
 
-    // Línea separadora
     doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#cccccc').stroke();
     doc.moveDown();
 
-    // Detalles de la Transacción
     doc.fontSize(14).font('Helvetica-Bold').text('Detalles de la Transacción', { align: 'center' });
     doc.moveDown();
 
     doc.fontSize(10).font('Helvetica-Bold').text('ID de Transacción: ', { continued: true }).font('Helvetica').text(withdrawal.id);
     
-    // 🗓️ FORMATEO EXACTO DE FECHA (DD/MM/YYYY HH:MM AM/PM) BLINDADO
-    const fechaBD = new Date(withdrawal.createdAt);
-    const dia = String(fechaBD.getDate()).padStart(2, '0');
-    const mes = String(fechaBD.getMonth() + 1).padStart(2, '0');
-    const anio = fechaBD.getFullYear();
+    // 🗓️ MAGIA TEMPORAL: Forzamos la zona horaria a Tijuana / Pacífico (Indestructible)
+    let fechaExacta = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Tijuana', 
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: true
+    }).format(new Date(withdrawal.createdAt));
     
-    let horas = fechaBD.getHours();
-    const minutos = String(fechaBD.getMinutes()).padStart(2, '0');
-    const ampm = horas >= 12 ? 'PM' : 'AM';
-    horas = horas % 12;
-    horas = horas ? horas : 12; // La hora '0' se convierte en '12'
-    
-    const fechaExacta = `${dia}/${mes}/${anio} ${String(horas).padStart(2, '0')}:${minutos} ${ampm}`;
+    // Limpiamos formato para que quede: 03/05/2026 03:20 PM
+    fechaExacta = fechaExacta.replace(',', '').toUpperCase();
 
     doc.font('Helvetica-Bold').text('Fecha de Solicitud: ', { continued: true }).font('Helvetica').text(fechaExacta);
     
-    // Traducir estado a algo más amigable
     let statusTexto = withdrawal.status;
     if (withdrawal.status === 'PAID' || withdrawal.status === 'APPROVED') statusTexto = 'COMPLETADO Y PAGADO';
     
     doc.font('Helvetica-Bold').text('Estado: ', { continued: true }).font('Helvetica').text(statusTexto);
 
-    // 🔥 MAGIA FINANCIERA: Extraer desglose exacto desde las notas del sistema
+    // 🔥 MAGIA FINANCIERA: Rastrear la transacción original para ignorar notas sobreescritas
     let bruto = withdrawal.amount;
     let neto = withdrawal.amount;
     let feeStr = "$0.00 USD (0%)";
     let tipoRetiro = "Estándar";
 
-    if (withdrawal.adminNotes) {
-      if (withdrawal.adminNotes.includes('EXPRÉS')) tipoRetiro = "Exprés (Instantáneo)";
-      
-      const matchNeto = withdrawal.adminNotes.match(/NETO:\s*\$([0-9.]+)/);
-      if (matchNeto) neto = parseFloat(matchNeto[1]);
-      
-      const matchFee = withdrawal.adminNotes.match(/Fee\s*\((.*?)\):\s*\$([0-9.]+)/);
-      if (matchFee) feeStr = `$${matchFee[2]} USD (${matchFee[1]})`;
+    // Buscamos en la BD la transacción exacta que ocurrió al mismo tiempo que el retiro
+    const tx = await prisma.transaction.findFirst({
+      where: {
+        senderId: withdrawal.creatorId,
+        type: 'PAYOUT',
+        createdAt: {
+          gte: new Date(withdrawal.createdAt.getTime() - 60000), // Margen de 1 minuto
+          lte: new Date(withdrawal.createdAt.getTime() + 60000)
+        }
+      }
+    });
+
+    if (tx) {
+      neto = Math.abs(tx.netAmount);
+      const feeCalculado = Math.abs(tx.platformFee);
+      const porcentaje = Math.round((feeCalculado / bruto) * 100);
+      feeStr = `$${feeCalculado.toFixed(2)} USD (${porcentaje}%)`;
+      if (tx.attachedMessage && tx.attachedMessage.includes('EXPRÉS')) {
+        tipoRetiro = "Exprés (Instantáneo)";
+      }
     }
 
     doc.font('Helvetica-Bold').text('Tipo de Retiro: ', { continued: true }).font('Helvetica').text(tipoRetiro);
     
     doc.moveDown(1);
     
-    // 🔥 DESGLOSE CLARO DE COMISIONES PARA EL CREADOR
+    // 🔥 DESGLOSE CLARO
     doc.font('Helvetica-Bold').text('Monto Bruto Solicitado: ', { continued: true }).font('Helvetica').text(`$${bruto.toFixed(2)} USD`);
     doc.font('Helvetica-Bold').text('Comisión de Plataforma: ', { continued: true }).fillColor('#ef4444').text(`- ${feeStr}`).fillColor('#000000');
     doc.font('Helvetica-Bold').text('Monto Neto Pagado: ', { continued: true }).fillColor('#22c55e').text(`$${neto.toFixed(2)} USD`).fillColor('#000000');
@@ -368,7 +358,6 @@ exports.downloadWithdrawalReceipt = async (req, res) => {
       doc.font('Helvetica-Bold').text('Billetera Destino: ', { continued: true }).font('Helvetica').text(withdrawal.cryptoAddress);
     }
     
-    // 🔥 FORZAR RED BASE (USDC)
     const networkDisplay = (!withdrawal.cryptoNetwork || withdrawal.cryptoNetwork === 'TRC20') ? 'Base (USDC)' : withdrawal.cryptoNetwork;
     doc.font('Helvetica-Bold').text('Red Cripto: ', { continued: true }).font('Helvetica').text(networkDisplay);
     
@@ -380,11 +369,9 @@ exports.downloadWithdrawalReceipt = async (req, res) => {
     doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#cccccc').stroke();
     doc.moveDown(2);
 
-    // Pie de página legal
     doc.fontSize(9).font('Helvetica-Oblique').fillColor('gray')
        .text('Este documento es un comprobante digital generado automáticamente y sirve como respaldo de liquidación de fondos en la plataforma Fansmio.', { align: 'center' });
 
-    // Finalizar y enviar documento
     doc.end();
 
   } catch (error) {
