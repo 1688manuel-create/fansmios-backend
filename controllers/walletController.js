@@ -12,7 +12,7 @@ exports.getWallet = async (req, res) => {
 
     if (!wallet) {
       wallet = await prisma.wallet.create({
-        data: { userId, balance: 0.0, pendingBalance: 0.0, coinBalance: 0 }
+        data: { userId, balance: 0.0, pendingBalance: 0.0 }
       });
     }
     res.status(200).json({ wallet });
@@ -28,7 +28,7 @@ exports.getWalletBalance = async (req, res) => {
 
     if (!wallet) {
       wallet = await prisma.wallet.create({
-        data: { userId: creatorId, balance: 0.0, pendingBalance: 0.0, coinBalance: 0 }
+        data: { userId: creatorId, balance: 0.0, pendingBalance: 0.0 }
       });
     }
 
@@ -94,8 +94,10 @@ exports.requestWithdrawal = async (req, res) => {
     if (!wallet || wallet.balance < withdrawalAmount) return res.status(400).json({ error: 'No tienes saldo disponible suficiente.' });
     if (!wallet.cryptoAddress || wallet.cryptoAddress.length < 10) return res.status(400).json({ error: 'Configura tu Billetera USDT (TRC20) antes de solicitar un retiro.' });
 
-    const settings = await prisma.platformSettings.findFirst() || { feeWithdrawalExp: 5, feeWithdrawalStd: 2 };
+    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL (🔥 CORREGIDO SINGULAR)
+    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feeWithdrawalExp: 5, feeWithdrawalStd: 2 };
     const feePercent = isExpress ? (settings.feeWithdrawalExp / 100) : (settings.feeWithdrawalStd / 100);
+    
     const feeAmount = withdrawalAmount * feePercent;
     const netAmount = withdrawalAmount - feeAmount;
     const typeLabel = isExpress ? '⚡ RETIRO EXPRÉS' : '🐢 RETIRO ESTÁNDAR';
@@ -164,7 +166,6 @@ exports.getDashboard = async (req, res) => {
       wallet: {
         balance: displayBalance,
         pendingBalance: wallet?.pendingBalance || 0,
-        coinBalance: wallet?.coinBalance || 0, 
         cryptoAddress: wallet?.cryptoAddress || null
       },
       totalEarnedHistorial, withdrawalHistory, recentTransactions: mappedTransactions
@@ -183,7 +184,7 @@ exports.updateCryptoAddress = async (req, res) => {
     const wallet = await prisma.wallet.upsert({
       where: { userId: userId },
       update: { cryptoAddress: cryptoAddress, cryptoNetwork: cryptoNetwork || 'TRC20' },
-      create: { userId: userId, balance: 0, pendingBalance: 0, coinBalance: 0, cryptoAddress: cryptoAddress, cryptoNetwork: cryptoNetwork || 'TRC20' }
+      create: { userId: userId, balance: 0, pendingBalance: 0, cryptoAddress: cryptoAddress, cryptoNetwork: cryptoNetwork || 'TRC20' }
     });
     res.status(200).json({ message: 'Billetera Cripto actualizada con éxito.', wallet });
   } catch (error) {
@@ -204,7 +205,7 @@ exports.buyCoins = async (req, res) => {
 
     let finalAmount = parseFloat(amountUsd);
 
-    // Validación pura de dólares (Sin coinsToAdd)
+    // Validación pura de dólares
     if (!finalAmount || finalAmount <= 0) {
       return res.status(400).json({ error: 'Monto de recarga inválido.' });
     }

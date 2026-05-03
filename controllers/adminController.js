@@ -65,7 +65,6 @@ const createPdfBuffer = (withdrawal) => {
 // ==========================================
 exports.changeUserStatus = async (req, res) => {
   try {
-    // 🔥 BLINDAJE: Aceptamos ambos formatos de variables (del Frontend o Postman)
     const targetId = req.body.targetUserId || req.body.userId || req.body.id;
     const statusToApply = req.body.newStatus || req.body.status;
     const notes = req.body.adminNotes || req.body.reason;
@@ -95,25 +94,45 @@ exports.changeUserStatus = async (req, res) => {
 };
 
 // ==========================================
-// 2. AJUSTAR LA COMISIÓN DE LA PLATAFORMA
+// 2. AJUSTAR LAS COMISIONES DE LA PLATAFORMA (🔥 CORREGIDO)
 // ==========================================
 exports.updatePlatformFee = async (req, res) => {
   try {
-    const { newFeePercent } = req.body; 
+    // 1. Atrapamos las 6 variables exactas que manda tu Frontend
+    const { 
+      feeSubscription, 
+      feePPV, 
+      feeTips, 
+      feeLive, 
+      feeWithdrawalStd, 
+      feeWithdrawalExp 
+    } = req.body; 
 
-    if (newFeePercent < 0 || newFeePercent > 100) {
-      return res.status(400).json({ error: 'La comisión debe estar entre 0 y 100.' });
-    }
-
+    // 2. Las guardamos en las columnas correspondientes en la Base de Datos
     const settings = await prisma.platformSetting.upsert({
       where: { id: 'global_settings' },
-      update: { platformFeePercent: newFeePercent },
-      create: { id: 'global_settings', platformFeePercent: newFeePercent }
+      update: { 
+        feeSubscription: feeSubscription !== undefined ? Number(feeSubscription) : undefined,
+        feePPV: feePPV !== undefined ? Number(feePPV) : undefined,
+        feeTips: feeTips !== undefined ? Number(feeTips) : undefined,
+        feeLive: feeLive !== undefined ? Number(feeLive) : undefined,
+        feeWithdrawalStd: feeWithdrawalStd !== undefined ? Number(feeWithdrawalStd) : undefined,
+        feeWithdrawalExp: feeWithdrawalExp !== undefined ? Number(feeWithdrawalExp) : undefined,
+      },
+      create: { 
+        id: 'global_settings', 
+        feeSubscription: Number(feeSubscription) || 20,
+        feePPV: Number(feePPV) || 20,
+        feeTips: Number(feeTips) || 20,
+        feeLive: Number(feeLive) || 30,
+        feeWithdrawalStd: Number(feeWithdrawalStd) || 2,
+        feeWithdrawalExp: Number(feeWithdrawalExp) || 5,
+      }
     });
 
-    res.status(200).json({ message: 'Comisión de la plataforma actualizada 💰', settings });
+    res.status(200).json({ message: 'Comisiones de la plataforma actualizadas 💰', settings });
   } catch (error) {
-    console.error('Error al actualizar comisión:', error);
+    console.error('Error al actualizar comisiones:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
@@ -126,7 +145,6 @@ exports.getReports = async (req, res) => {
     const reports = await prisma.report.findMany({
       where: { status: 'PENDING' },
       include: {
-        // 🔥 EL FIX: Ahora pedimos explícitamente el username además del email
         reporter: { select: { email: true, username: true } },
         reportedUser: { select: { email: true, username: true } }
       }
@@ -164,7 +182,6 @@ exports.resolveReport = async (req, res) => {
       data: { status: newStatus }
     });
 
-    // Prevención de crash si el reason viene vacío
     const reasonText = report.reason || 'Reporte de moderación';
     const tituloReporte = reasonText.split(' | '); 
     const estadoTexto = newStatus === 'RESOLVED' ? 'Resuelto ✅' : 'Descartado ❌';
@@ -200,7 +217,6 @@ exports.resolveReport = async (req, res) => {
 // ==========================================
 exports.handleWithdrawal = async (req, res) => {
   try {
-    // 🔥 BLINDAJE: Aceptamos ambos formatos de variables
     const wId = req.body.withdrawalId || req.body.id; 
     const statusToApply = req.body.newStatus || req.body.status;
     const notes = req.body.adminNotes || req.body.reason || '';
@@ -212,7 +228,6 @@ exports.handleWithdrawal = async (req, res) => {
     const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'PAID'];
     if (!validStatuses.includes(statusToApply)) return res.status(400).json({ error: 'Estado de retiro inválido.' });
 
-    // 🔥 MODIFICADO LIGERAMENTE PARA INCLUIR AL CREADOR Y SU CORREO
     const withdrawal = await prisma.withdrawal.findUnique({ 
       where: { id: wId },
       include: { creator: true } 
@@ -224,17 +239,14 @@ exports.handleWithdrawal = async (req, res) => {
       return res.status(400).json({ error: 'Este retiro ya fue procesado previamente.' });
     }
 
-    // Determinamos el ID del creador sin importar cómo esté en la tabla
     const creatorId = withdrawal.creatorId || withdrawal.userId;
 
     await prisma.$transaction(async (tx) => {
-      // 1. Actualizamos el estado del retiro
       await tx.withdrawal.update({
         where: { id: wId },
         data: { status: statusToApply, adminNotes: notes || null }
       });
 
-      // 2. Si rechazamos, DEVOLVEMOS el dinero a la billetera del creador
       if (statusToApply === 'REJECTED') {
         await tx.wallet.update({
           where: { userId: creatorId },
@@ -243,13 +255,12 @@ exports.handleWithdrawal = async (req, res) => {
       }
     });
 
-    // 🔥 NUEVO: ENVIAR COMPROBANTE PDF POR CORREO SI SE APROBÓ O PAGÓ
     if ((statusToApply === 'APPROVED' || statusToApply === 'PAID') && withdrawal.creator?.email) {
       try {
         const pdfBuffer = await createPdfBuffer(withdrawal);
         
         await resend.emails.send({
-          from: 'Fansmio Finanzas <pagos@fansmio.com>', // Asegúrate de usar el dominio verificado en Resend
+          from: 'Fansmio Finanzas <pagos@fansmio.com>', 
           to: [withdrawal.creator.email],
           subject: "✅ ¡Tu retiro de Fansmio ha sido procesado!",
           html: `
@@ -272,7 +283,6 @@ exports.handleWithdrawal = async (req, res) => {
         });
       } catch (emailError) {
         console.error("⚠️ Error enviando el correo con Resend:", emailError);
-        // No bloqueamos la respuesta al cliente; el pago sí se hizo en la DB.
       }
     }
 
@@ -284,7 +294,7 @@ exports.handleWithdrawal = async (req, res) => {
 };
 
 // ==========================================
-// 5. VER ESTADÍSTICAS GLOBALES
+// 5. VER ESTADÍSTICAS GLOBALES (🔥 CORREGIDO)
 // ==========================================
 exports.getGlobalStats = async (req, res) => {
   try {
@@ -292,6 +302,7 @@ exports.getGlobalStats = async (req, res) => {
     const totalCreators = await prisma.user.count({ where: { role: 'CREATOR' } });
     const totalPosts = await prisma.post.count();
     
+    // Obtenemos TODAS las comisiones configuradas
     const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } });
 
     res.status(200).json({
@@ -300,7 +311,7 @@ exports.getGlobalStats = async (req, res) => {
         totalFans,
         totalCreators,
         totalPosts,
-        currentPlatformFee: settings ? `${settings.platformFeePercent}%` : 'No configurada (Por defecto 20%)'
+        settings: settings || null // Devolvemos el paquete de settings completo para que el frontend lo lea
       }
     });
   } catch (error) {
@@ -357,23 +368,19 @@ exports.getAllWithdrawals = async (req, res) => {
 // ==========================================
 // 8. LA BÓVEDA DEL COMANDANTE (Retirar Ganancias de FansMio)
 // ==========================================
-
 exports.getPlatformVaultBalance = async (req, res) => {
   try {
-    // 1. Sumamos todas las comisiones cobradas (Ingresos Brutos)
     const totalFeesAggr = await prisma.transaction.aggregate({
       where: { status: { in: ['COMPLETED', 'PENDING'] } },
       _sum: { platformFee: true }
     });
     const ingresosBrutos = totalFeesAggr._sum.platformFee || 0;
 
-    // 2. Sumamos todo lo que el Admin ya retiró en el pasado
     const totalWithdrawnAggr = await prisma.platformWithdrawal.aggregate({
       _sum: { amount: true }
     });
     const totalRetirado = totalWithdrawnAggr._sum.amount || 0;
 
-    // 3. Lo que te queda disponible para sacar hoy
     const saldoDisponible = ingresosBrutos - totalRetirado;
 
     res.status(200).json({
@@ -399,7 +406,6 @@ exports.withdrawPlatformProfit = async (req, res) => {
       return res.status(400).json({ error: 'Monto inválido.' });
     }
 
-    // 1. Verificar si hay fondos suficientes
     const totalFeesAggr = await prisma.transaction.aggregate({
       where: { status: { in: ['COMPLETED', 'PENDING'] } },
       _sum: { platformFee: true }
@@ -419,7 +425,6 @@ exports.withdrawPlatformProfit = async (req, res) => {
       });
     }
 
-    // 2. Registrar el retiro del Admin
     const platformWithdrawal = await prisma.platformWithdrawal.create({
       data: {
         adminId: adminId,
@@ -437,5 +442,17 @@ exports.withdrawPlatformProfit = async (req, res) => {
   } catch (error) {
     console.error('Error al retirar ganancias:', error);
     res.status(500).json({ error: 'Error interno al procesar el retiro de la plataforma.' });
+  }
+};
+
+// ==========================================
+// 9. EXTRA: OBTENER SOLO LAS COMISIONES
+// ==========================================
+exports.getPlatformSettings = async (req, res) => {
+  try {
+    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } });
+    res.status(200).json(settings || {});
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener comisiones' });
   }
 };

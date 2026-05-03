@@ -39,8 +39,8 @@ exports.createPaymentIntent = async (req, res) => {
 
     if (finalAmount < 0.50) finalAmount = 0.50;
 
-    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL
-    const settings = await prisma.platformSettings.findFirst() || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20, feeReferral: 5 };
+    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL (🔥 CORREGIDO SINGULAR)
+    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20, feeReferral: 5 };
     
     let feePercent = 0.20; // Default por seguridad
     if (type === 'LIVE_TICKET' || type === 'PPV_LIVE') {
