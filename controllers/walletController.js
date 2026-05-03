@@ -3,6 +3,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const speakeasy = require('speakeasy'); 
 const axios = require('axios'); // 🔥 Para conectar con PayRam
+const PDFDocument = require('pdfkit');
 
 exports.getWallet = async (req, res) => {
   try {
@@ -237,5 +238,104 @@ exports.buyCoins = async (req, res) => {
   } catch (error) {
     console.error("❌ Error generando orden CovraPay:", error.message);
     res.status(500).json({ error: "No se pudo conectar con la pasarela blindada. Intenta de nuevo." });
+  }
+};
+
+// ==========================================
+// 📄 GENERADOR DE COMPROBANTES PDF (FINTECH)
+// ==========================================
+exports.downloadWithdrawalReceipt = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // 1. Buscamos el retiro en la base de datos
+    const withdrawal = await prisma.withdrawal.findUnique({
+      where: { id },
+      include: { creator: true }
+    });
+
+    if (!withdrawal) {
+      return res.status(404).json({ error: "Retiro no encontrado" });
+    }
+
+    // 2. Blindaje: Solo el dueño del retiro o un ADMIN puede descargarlo
+    if (withdrawal.creatorId !== userId && userRole !== 'ADMIN') {
+      return res.status(403).json({ error: "Acceso denegado a este comprobante" });
+    }
+
+    // 3. Configuramos las cabeceras HTTP para forzar la descarga de un PDF
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=Fansmio_Recibo_${withdrawal.id.substring(0,8)}.pdf`);
+
+    // 4. Inicializamos el documento PDF
+    const doc = new PDFDocument({ margin: 50 });
+    
+    // Conectamos el documento directamente a la respuesta (stream)
+    doc.pipe(res);
+
+    // --- DISEÑO DEL PDF ---
+    // Título / Logo
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#22c55e').text('FANSMIO', { align: 'center' });
+    doc.fontSize(12).font('Helvetica').fillColor('#000000').text('Comprobante de Liquidación (Payout Receipt)', { align: 'center' });
+    doc.moveDown(2);
+
+    // Detalles del Emisor
+    doc.fontSize(10).font('Helvetica-Bold').text('Detalles del Emisor:');
+    doc.font('Helvetica').text('Fansmio Inc.');
+    doc.text('https://fansmio.com');
+    doc.moveDown();
+
+    // Detalles del Creador
+    doc.font('Helvetica-Bold').text('Detalles del Beneficiario:');
+    doc.font('Helvetica').text(`Usuario: @${withdrawal.creator.username || 'Creador'}`);
+    doc.text(`ID de Plataforma: ${withdrawal.creatorId}`);
+    doc.moveDown();
+
+    // Línea separadora
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown();
+
+    // Detalles de la Transacción
+    doc.fontSize(14).font('Helvetica-Bold').text('Detalles de la Transacción', { align: 'center' });
+    doc.moveDown();
+
+    doc.fontSize(10).font('Helvetica-Bold').text('ID de Transacción: ', { continued: true }).font('Helvetica').text(withdrawal.id);
+    doc.font('Helvetica-Bold').text('Fecha de Solicitud: ', { continued: true }).font('Helvetica').text(new Date(withdrawal.createdAt).toLocaleString());
+    
+    // Traducir estado a algo más amigable
+    let statusTexto = withdrawal.status;
+    if (withdrawal.status === 'PAID' || withdrawal.status === 'APPROVED') statusTexto = 'COMPLETADO Y PAGADO';
+    
+    doc.font('Helvetica-Bold').text('Estado: ', { continued: true }).font('Helvetica').text(statusTexto);
+    doc.font('Helvetica-Bold').text('Monto Pagado: ', { continued: true }).fillColor('#22c55e').text(`$${withdrawal.amount.toFixed(2)} USD`).fillColor('#000000');
+    
+    if (withdrawal.cryptoAddress) {
+      doc.font('Helvetica-Bold').text('Billetera Destino: ', { continued: true }).font('Helvetica').text(withdrawal.cryptoAddress);
+    }
+    if (withdrawal.cryptoNetwork) {
+      doc.font('Helvetica-Bold').text('Red Cripto: ', { continued: true }).font('Helvetica').text(withdrawal.cryptoNetwork);
+    }
+    if (withdrawal.txHash) {
+      doc.font('Helvetica-Bold').text('Hash de Transacción (TxHash): ', { continued: true }).font('Helvetica').text(withdrawal.txHash);
+    }
+
+    doc.moveDown(2);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown(2);
+
+    // Pie de página legal
+    doc.fontSize(9).font('Helvetica-Oblique').fillColor('gray')
+       .text('Este documento es un comprobante digital generado automáticamente y sirve como respaldo de liquidación de fondos en la plataforma Fansmio.', { align: 'center' });
+
+    // Finalizar y enviar documento
+    doc.end();
+
+  } catch (error) {
+    console.error("Error generando PDF:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Error interno al generar el PDF" });
+    }
   }
 };
