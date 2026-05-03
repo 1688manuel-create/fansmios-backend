@@ -222,6 +222,12 @@ model CreatorProfile {
   instagram    String?
   twitter      String?
   website      String?
+
+  // 🔥 MODO DIOS: COMISIONES VIP (Opcionales)
+  customFeeSubscription Float?
+  customFeePPV          Float?
+  customFeeTips         Float?
+  customFeeLive         Float?
 }
 
 model Promotion {

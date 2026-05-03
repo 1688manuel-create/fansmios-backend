@@ -456,3 +456,42 @@ exports.getPlatformSettings = async (req, res) => {
     res.status(500).json({ error: 'Error al obtener comisiones' });
   }
 };
+
+// ==========================================
+// 👑 MODO DIOS: ASIGNAR COMISIÓN VIP A UN CREADOR
+// ==========================================
+exports.setVipCommission = async (req, res) => {
+  try {
+    const { username, customFeeSubscription, customFeePPV, customFeeTips, customFeeLive } = req.body;
+
+    if (!username) {
+      return res.status(400).json({ error: 'Debes ingresar el nombre de usuario del creador.' });
+    }
+
+    // Buscamos al usuario por su @username
+    const user = await prisma.user.findUnique({
+      where: { username },
+      include: { creatorProfile: true }
+    });
+
+    if (!user || !user.creatorProfile) {
+      return res.status(404).json({ error: 'Creador no encontrado o no tiene un perfil activo.' });
+    }
+
+    // Actualizamos su perfil con las tarifas VIP (si envías vacío, se borra y vuelve a la tarifa global)
+    await prisma.creatorProfile.update({
+      where: { userId: user.id },
+      data: {
+        customFeeSubscription: customFeeSubscription ? parseFloat(customFeeSubscription) : null,
+        customFeePPV: customFeePPV ? parseFloat(customFeePPV) : null,
+        customFeeTips: customFeeTips ? parseFloat(customFeeTips) : null,
+        customFeeLive: customFeeLive ? parseFloat(customFeeLive) : null,
+      }
+    });
+
+    res.status(200).json({ message: `¡Comisiones VIP aplicadas con éxito al creador @${username}! 👑` });
+  } catch (error) {
+    console.error('Error al asignar comisión VIP:', error);
+    res.status(500).json({ error: 'Error interno del servidor al actualizar el perfil.' });
+  }
+};
