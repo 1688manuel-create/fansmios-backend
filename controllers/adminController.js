@@ -2,6 +2,64 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+// 🔥 NUEVAS IMPORTACIONES: PDF Y RESEND
+const PDFDocument = require('pdfkit');
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// ==========================================
+// 📩 UTILIDAD: FABRICAR PDF EN MEMORIA (RAM)
+// ==========================================
+const createPdfBuffer = (withdrawal) => {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 });
+    let buffers = [];
+    
+    doc.on('data', buffers.push.bind(buffers));
+    doc.on('end', () => resolve(Buffer.concat(buffers)));
+    doc.on('error', reject);
+
+    // --- DIBUJAR EL PDF ---
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#22c55e').text('FANSMIO', { align: 'center' });
+    doc.fontSize(12).font('Helvetica').fillColor('#000000').text('Comprobante de Liquidación (Payout Receipt)', { align: 'center' });
+    doc.moveDown(2);
+
+    doc.fontSize(10).font('Helvetica-Bold').text('Detalles del Emisor:');
+    doc.font('Helvetica').text('Fansmio Inc.');
+    doc.text('https://fansmio.com');
+    doc.moveDown();
+
+    doc.font('Helvetica-Bold').text('Detalles del Beneficiario:');
+    doc.font('Helvetica').text(`Usuario: @${withdrawal.creator?.username || 'Creador'}`);
+    doc.text(`ID: ${withdrawal.creatorId || withdrawal.userId}`);
+    doc.moveDown();
+
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown();
+
+    doc.fontSize(14).font('Helvetica-Bold').text('Detalles de la Transacción', { align: 'center' });
+    doc.moveDown();
+
+    doc.fontSize(10).font('Helvetica-Bold').text('ID de Transacción: ', { continued: true }).font('Helvetica').text(withdrawal.id);
+    doc.font('Helvetica-Bold').text('Fecha de Aprobación: ', { continued: true }).font('Helvetica').text(new Date().toLocaleString());
+    doc.font('Helvetica-Bold').text('Estado: ', { continued: true }).font('Helvetica').text('COMPLETADO Y PAGADO');
+    doc.font('Helvetica-Bold').text('Monto Pagado: ', { continued: true }).fillColor('#22c55e').text(`$${withdrawal.amount.toFixed(2)} USD`).fillColor('#000000');
+    
+    if (withdrawal.cryptoAddress) {
+      doc.font('Helvetica-Bold').text('Billetera: ', { continued: true }).font('Helvetica').text(withdrawal.cryptoAddress);
+    }
+
+    doc.moveDown(2);
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).strokeColor('#cccccc').stroke();
+    doc.moveDown(2);
+
+    doc.fontSize(9).font('Helvetica-Oblique').fillColor('gray')
+       .text('Comprobante digital generado automáticamente. Fansmio no se hace responsable por direcciones de billetera incorrectas provistas por el usuario.', { align: 'center' });
+
+    doc.end();
+  });
+};
+
 // ==========================================
 // 1. BANEAR O SUSPENDER USUARIOS
 // ==========================================
@@ -154,7 +212,12 @@ exports.handleWithdrawal = async (req, res) => {
     const validStatuses = ['PENDING', 'APPROVED', 'REJECTED', 'PAID'];
     if (!validStatuses.includes(statusToApply)) return res.status(400).json({ error: 'Estado de retiro inválido.' });
 
-    const withdrawal = await prisma.withdrawal.findUnique({ where: { id: wId } });
+    // 🔥 MODIFICADO LIGERAMENTE PARA INCLUIR AL CREADOR Y SU CORREO
+    const withdrawal = await prisma.withdrawal.findUnique({ 
+      where: { id: wId },
+      include: { creator: true } 
+    });
+    
     if (!withdrawal) return res.status(404).json({ error: 'Retiro no encontrado.' });
     
     if (withdrawal.status !== 'PENDING' && withdrawal.status !== 'APPROVED') {
@@ -179,6 +242,39 @@ exports.handleWithdrawal = async (req, res) => {
         });
       }
     });
+
+    // 🔥 NUEVO: ENVIAR COMPROBANTE PDF POR CORREO SI SE APROBÓ O PAGÓ
+    if ((statusToApply === 'APPROVED' || statusToApply === 'PAID') && withdrawal.creator?.email) {
+      try {
+        const pdfBuffer = await createPdfBuffer(withdrawal);
+        
+        await resend.emails.send({
+          from: 'Fansmio Finanzas <pagos@fansmio.com>', // Asegúrate de usar el dominio verificado en Resend
+          to: [withdrawal.creator.email],
+          subject: "✅ ¡Tu retiro de Fansmio ha sido procesado!",
+          html: `
+            <div style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+              <h2 style="color: #22c55e;">¡Hola @${withdrawal.creator.username || 'Creador'}!</h2>
+              <p>Te informamos que tu solicitud de retiro por la cantidad de <strong>$${withdrawal.amount.toFixed(2)} USD</strong> ha sido procesada con éxito.</p>
+              <p>Los fondos han sido gestionados para ser enviados a tu billetera Cripto.</p>
+              <p>Adjunto a este correo encontrarás el comprobante de liquidación oficial en formato PDF para tus registros financieros o fiscales.</p>
+              <br>
+              <p>Sigue creando. Sigue facturando.</p>
+              <p><strong>El Equipo de Fansmio</strong></p>
+            </div>
+          `,
+          attachments: [
+            {
+              filename: `Fansmio_Recibo_${withdrawal.id.substring(0,8)}.pdf`,
+              content: pdfBuffer,
+            }
+          ]
+        });
+      } catch (emailError) {
+        console.error("⚠️ Error enviando el correo con Resend:", emailError);
+        // No bloqueamos la respuesta al cliente; el pago sí se hizo en la DB.
+      }
+    }
 
     res.status(200).json({ message: `Retiro actualizado a: ${statusToApply} 💸` });
   } catch (error) {

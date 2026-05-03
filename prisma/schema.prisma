@@ -143,7 +143,7 @@ model User {
 
   platformWithdrawals PlatformWithdrawal[]
 
-  sentMessages      Message[]      @relation("SentMessages")
+  sentMessages       Message[]      @relation("SentMessages")
   receivedMessages Message[]      @relation("ReceivedMessages")
   creatorChats     Conversation[] @relation("CreatorConversations")
   fanChats         Conversation[] @relation("FanConversations")
@@ -304,14 +304,14 @@ model Wallet {
 }
 
 model Subscription {
-  id               String             @id @default(uuid())
-  fanId            String
-  creatorId        String
-  status           SubscriptionStatus @default(ACTIVE)
-  price            Float
-  startDate        DateTime           @default(now())
-  endDate          DateTime 
-  reminderSent     Boolean @default(false) 
+  id                 String             @id @default(uuid())
+  fanId              String
+  creatorId          String
+  status             SubscriptionStatus @default(ACTIVE)
+  price              Float
+  startDate          DateTime           @default(now())
+  endDate            DateTime 
+  reminderSent       Boolean @default(false) 
   fan       User @relation("FanSubscriptions", fields: [fanId], references: [id], onDelete: Cascade)
   creator   User @relation("CreatorSubscribers", fields: [creatorId], references: [id], onDelete: Cascade)
   @@unique([fanId, creatorId])
@@ -431,8 +431,8 @@ model Bundle {
   price       Float
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  creator   User              @relation("CreatorBundles", fields: [creatorId], references: [id], onDelete: Cascade)
-  posts     Post[]            @relation("BundlePosts")
+  creator   User             @relation("CreatorBundles", fields: [creatorId], references: [id], onDelete: Cascade)
+  posts     Post[]           @relation("BundlePosts")
   purchases BundlePurchase[]
 }
 
@@ -567,7 +567,7 @@ model Coupon {
 // ==========================================
 // ⚙️ MODO DIOS: CONFIGURACIÓN GLOBAL
 // ==========================================
-model PlatformSettings {
+model PlatformSetting {
   id                 String   @id @default(uuid())
   feeSubscription    Float    @default(20.0) 
   feePPV             Float    @default(20.0) 
