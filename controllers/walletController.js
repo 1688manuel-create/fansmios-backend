@@ -282,7 +282,13 @@ exports.downloadWithdrawalReceipt = async (req, res) => {
     doc.pipe(res);
 
     // --- DISEÑO DEL PDF ---
-    // Título / Logo
+    
+    // 🎨 LOGO DE LA PÁGINA (OPCIONAL)
+    // Si tienes el logo guardado en la carpeta de tu backend, descomenta la siguiente línea y ajusta la ruta:
+    // doc.image('public/logo.png', { fit: [100, 100], align: 'center' }); 
+    // doc.moveDown(1);
+
+    // Título / Logo Texto
     doc.fontSize(22).font('Helvetica-Bold').fillColor('#22c55e').text('FANSMIO', { align: 'center' });
     doc.fontSize(12).font('Helvetica').fillColor('#000000').text('Comprobante de Liquidación (Payout Receipt)', { align: 'center' });
     doc.moveDown(2);
@@ -308,21 +314,64 @@ exports.downloadWithdrawalReceipt = async (req, res) => {
     doc.moveDown();
 
     doc.fontSize(10).font('Helvetica-Bold').text('ID de Transacción: ', { continued: true }).font('Helvetica').text(withdrawal.id);
-    doc.font('Helvetica-Bold').text('Fecha de Solicitud: ', { continued: true }).font('Helvetica').text(new Date(withdrawal.createdAt).toLocaleString());
+    
+    // 🗓️ FORMATEO EXACTO DE FECHA (DD/MM/YYYY HH:MM AM/PM) BLINDADO
+    const fechaBD = new Date(withdrawal.createdAt);
+    const dia = String(fechaBD.getDate()).padStart(2, '0');
+    const mes = String(fechaBD.getMonth() + 1).padStart(2, '0');
+    const anio = fechaBD.getFullYear();
+    
+    let horas = fechaBD.getHours();
+    const minutos = String(fechaBD.getMinutes()).padStart(2, '0');
+    const ampm = horas >= 12 ? 'PM' : 'AM';
+    horas = horas % 12;
+    horas = horas ? horas : 12; // La hora '0' se convierte en '12'
+    
+    const fechaExacta = `${dia}/${mes}/${anio} ${String(horas).padStart(2, '0')}:${minutos} ${ampm}`;
+
+    doc.font('Helvetica-Bold').text('Fecha de Solicitud: ', { continued: true }).font('Helvetica').text(fechaExacta);
     
     // Traducir estado a algo más amigable
     let statusTexto = withdrawal.status;
     if (withdrawal.status === 'PAID' || withdrawal.status === 'APPROVED') statusTexto = 'COMPLETADO Y PAGADO';
     
     doc.font('Helvetica-Bold').text('Estado: ', { continued: true }).font('Helvetica').text(statusTexto);
-    doc.font('Helvetica-Bold').text('Monto Pagado: ', { continued: true }).fillColor('#22c55e').text(`$${withdrawal.amount.toFixed(2)} USD`).fillColor('#000000');
+
+    // 🔥 MAGIA FINANCIERA: Extraer desglose exacto desde las notas del sistema
+    let bruto = withdrawal.amount;
+    let neto = withdrawal.amount;
+    let feeStr = "$0.00 USD (0%)";
+    let tipoRetiro = "Estándar";
+
+    if (withdrawal.adminNotes) {
+      if (withdrawal.adminNotes.includes('EXPRÉS')) tipoRetiro = "Exprés (Instantáneo)";
+      
+      const matchNeto = withdrawal.adminNotes.match(/NETO:\s*\$([0-9.]+)/);
+      if (matchNeto) neto = parseFloat(matchNeto[1]);
+      
+      const matchFee = withdrawal.adminNotes.match(/Fee\s*\((.*?)\):\s*\$([0-9.]+)/);
+      if (matchFee) feeStr = `$${matchFee[2]} USD (${matchFee[1]})`;
+    }
+
+    doc.font('Helvetica-Bold').text('Tipo de Retiro: ', { continued: true }).font('Helvetica').text(tipoRetiro);
     
+    doc.moveDown(1);
+    
+    // 🔥 DESGLOSE CLARO DE COMISIONES PARA EL CREADOR
+    doc.font('Helvetica-Bold').text('Monto Bruto Solicitado: ', { continued: true }).font('Helvetica').text(`$${bruto.toFixed(2)} USD`);
+    doc.font('Helvetica-Bold').text('Comisión de Plataforma: ', { continued: true }).fillColor('#ef4444').text(`- ${feeStr}`).fillColor('#000000');
+    doc.font('Helvetica-Bold').text('Monto Neto Pagado: ', { continued: true }).fillColor('#22c55e').text(`$${neto.toFixed(2)} USD`).fillColor('#000000');
+    
+    doc.moveDown(1);
+
     if (withdrawal.cryptoAddress) {
       doc.font('Helvetica-Bold').text('Billetera Destino: ', { continued: true }).font('Helvetica').text(withdrawal.cryptoAddress);
     }
-    if (withdrawal.cryptoNetwork) {
-      doc.font('Helvetica-Bold').text('Red Cripto: ', { continued: true }).font('Helvetica').text(withdrawal.cryptoNetwork);
-    }
+    
+    // 🔥 FORZAR RED BASE (USDC)
+    const networkDisplay = (!withdrawal.cryptoNetwork || withdrawal.cryptoNetwork === 'TRC20') ? 'Base (USDC)' : withdrawal.cryptoNetwork;
+    doc.font('Helvetica-Bold').text('Red Cripto: ', { continued: true }).font('Helvetica').text(networkDisplay);
+    
     if (withdrawal.txHash) {
       doc.font('Helvetica-Bold').text('Hash de Transacción (TxHash): ', { continued: true }).font('Helvetica').text(withdrawal.txHash);
     }
