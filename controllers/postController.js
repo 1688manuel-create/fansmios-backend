@@ -371,13 +371,38 @@ exports.deletePost = async (req, res) => {
 
 exports.deleteComment = async (req, res) => {
   try {
-    const { id } = req.params; 
-    const userId = req.user.userId;
-    const comment = await prisma.comment.findUnique({ where: { id } });
-    if (!comment || comment.userId !== userId) return res.status(403).json({ error: 'No autorizado' });
+    const { id } = req.params; // ID del comentario
+    const userId = req.user.userId; // Tu ID (Creador)
+
+    // 1. Buscamos el comentario incluyendo los datos del POST al que pertenece
+    const comment = await prisma.comment.findUnique({ 
+      where: { id },
+      include: { post: true } // 🚨 CLAVE: Para saber quién es el dueño del post
+    });
+
+    if (!comment) return res.status(404).json({ error: 'Comentario no encontrado.' });
+
+    // 🛡️ REGLA DE MODERACIÓN FANSMIO:
+    const isAuthor = comment.userId === userId; // ¿El fan quiere borrar su propio comentario?
+    const isPostOwner = comment.post.userId === userId; // ¿TÚ eres el dueño del post (Creador)?
+    const isAdmin = req.user.role === 'ADMIN'; // ¿Es el administrador?
+
+    // Si no eres el autor, ni el dueño del post, ni el admin, no pasas
+    if (!isAuthor && !isPostOwner && !isAdmin) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar este comentario.' });
+    }
+
+    // 2. Ejecutar la eliminación
     await prisma.comment.delete({ where: { id } });
-    res.status(200).json({ message: 'Eliminado.' });
-  } catch (error) { res.status(500).json({ error: 'Error.' }); }
+
+    res.status(200).json({ 
+      message: isPostOwner && !isAuthor ? 'Comentario grosero eliminado por el Creador.' : 'Eliminado.' 
+    });
+
+  } catch (error) { 
+    console.error("🚨 Error al moderar comentario:", error);
+    res.status(500).json({ error: 'Error interno del servidor.' }); 
+  }
 };
 
 exports.toggleCommentLike = async (req, res) => { res.status(200).json({ message: 'Ok' }); };
