@@ -99,27 +99,36 @@ exports.approveWithdrawal = async (req, res) => {
       return res.status(400).json({ error: 'El retiro no existe o ya fue procesado.' });
     }
 
-    // 🌐 1. CONEXIÓN A LA PASARELA DE PAGOS (PAYRAM / COVRA)
+    // 🌐 1. CONEXIÓN A TU INSTANCIA PRIVADA (COVRA PAY EN RED BASE)
     // ==============================================================
     let txHashGenerado = '';
     
     try {
-      // Reemplaza esta URL con el endpoint real de envíos de PayRam
-      const apiResponse = await axios.post('https://api.covrapay.com/v1/payouts', {
+      // Usamos tu BASE_URL (https://covrapay.com:8443) desde el entorno
+      const apiResponse = await axios.post(`${process.env.PAYRAM_BASE_URL}/api/payouts`, {
         amount: withdrawal.amount,
         address: withdrawal.cryptoAddress || withdrawal.creator?.wallet?.cryptoAddress,
-        currency: withdrawal.cryptoNetwork || 'USDT'
+        currency: 'USDC',  // 🎯 Ajustado a tu configuración en Base
+        network: 'Base'    // 🎯 Ajustado a tu red activa
       }, {
-        headers: { 'Authorization': `Bearer ${process.env.PAYMENT_GATEWAY_API_KEY}` }
+        headers: { 
+          'Authorization': `Bearer ${process.env.PAYMENT_GATEWAY_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
       });
       
-      txHashGenerado = apiResponse.data.transactionHash || `PAYRAM_${Date.now()}`;
+      // Capturamos el Hash real de la red Base
+      txHashGenerado = apiResponse.data.transactionHash || apiResponse.data.id;
     } catch (gatewayError) {
-      console.error("🚨 Error en pasarela PayRam:", gatewayError.response?.data || gatewayError.message);
-      return res.status(502).json({ error: "La pasarela de cripto rechazó la transacción. Verifica fondos o la red." });
+      // Log detallado para ver el pecado exacto en la terminal de Coolify
+      console.error("🚨 Error en pasarela Covra (Base):", gatewayError.response?.data || gatewayError.message);
+      
+      return res.status(502).json({ 
+        error: "La pasarela rechazó la transacción.",
+        details: gatewayError.response?.data?.message || "Verifica fondos en la red Base."
+      });
     }
     // ==============================================================
-
     // 💾 2. ACTUALIZACIÓN EN BASE DE DATOS (ATÓMICA)
     await prisma.$transaction(async (tx) => {
       // Marcar el retiro como pagado con el Hash real
