@@ -128,9 +128,9 @@ exports.getBillingHistory = async (req, res) => {
 // ==========================================
 exports.getPlatformSettings = async (req, res) => {
   try {
-    let settings = await prisma.platformSettings.findFirst();
+    let settings = await prisma.platformSetting.findFirst(); // 🔥 Corregido
     if (!settings) {
-      settings = await prisma.platformSettings.create({ data: {} }); // Crea los valores por defecto si no existen
+      settings = await prisma.platformSetting.create({ data: {} }); // 🔥 Corregido
     }
     res.status(200).json(settings);
   } catch (error) {
@@ -145,10 +145,10 @@ exports.getPlatformSettings = async (req, res) => {
 exports.updatePlatformSettings = async (req, res) => {
   try {
     const data = req.body;
-    let settings = await prisma.platformSettings.findFirst();
+    let settings = await prisma.platformSetting.findFirst(); // 🔥 Corregido
 
     if (settings) {
-      settings = await prisma.platformSettings.update({
+      settings = await prisma.platformSetting.update({ // 🔥 Corregido
         where: { id: settings.id },
         data: {
           feeSubscription: parseFloat(data.feeSubscription),
@@ -160,7 +160,7 @@ exports.updatePlatformSettings = async (req, res) => {
         }
       });
     } else {
-      settings = await prisma.platformSettings.create({ data });
+      settings = await prisma.platformSetting.create({ data }); // 🔥 Corregido
     }
     
     res.status(200).json({ message: '¡Comisiones de FansMio actualizadas con éxito! 👑', settings });
