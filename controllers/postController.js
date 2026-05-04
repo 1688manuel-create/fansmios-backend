@@ -55,7 +55,7 @@ const scanContentStrict = async (filePath, mimetype) => {
 };
 
 // ==========================================
-// 1. CREAR PUBLICACIÓN (Soporta 5 imágenes o 1 video)
+// 1. CREAR PUBLICACIÓN (Soporta 5 imágenes o 1 video) BLINDADO 🛡️
 // ==========================================
 exports.createPost = async (req, res) => {
   try {
@@ -80,28 +80,48 @@ exports.createPost = async (req, res) => {
       mediaType = hasVideo ? 'VIDEO' : 'IMAGE';
 
       for (const file of files) {
+        // 1. Escanear con Sightengine
         const scanResult = await scanContentStrict(file.path, file.mimetype);
         if (!scanResult.isSafe) {
           files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
           return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
         }
-        mediaUrls.push(file.path);
+
+        // 🔥 2. SUBIR A CLOUDINARY (El paso que faltaba)
+        const uploadResult = await cloudinary.uploader.upload(file.path, {
+          folder: 'fansmio_uploads',
+          resource_type: hasVideo ? 'video' : 'image'
+        });
+
+        // 3. Guardar la URL real de la nube, no la ruta local
+        mediaUrls.push(uploadResult.secure_url);
+
+        // 4. Limpiar el archivo del disco duro del servidor para ahorrar espacio
+        if(fs.existsSync(file.path)) fs.unlinkSync(file.path);
       }
     }
 
     if (!content && mediaUrls.length === 0) return res.status(400).json({ error: 'El post está vacío.' });
     if (content && containsForbiddenWords(content)) return res.status(403).json({ error: 'Contenido prohibido.' });
 
-    // 🔥 FIX: Guardar correctamente el primer elemento o el JSON
-    const finalMediaUrl = mediaUrls.length > 1 ? JSON.stringify(mediaUrls) : (mediaUrls.length === 1 ? mediaUrls : null);
+    // 🔥 FIX: Guardar el texto directo (mediaUrls[0]) si es 1, o convertir a JSON si son varias
+    const finalMediaUrl = mediaUrls.length > 1 ? JSON.stringify(mediaUrls) : (mediaUrls.length === 1 ? mediaUrls[0] : null);
 
     const newPost = await prisma.post.create({
-      data: { content: content || null, mediaUrl: finalMediaUrl, mediaType, isPPV: isPPV === 'true' || isPPV === true, price: price ? parseFloat(price) : 0, userId },
+      data: { 
+        content: content || null, 
+        mediaUrl: finalMediaUrl, 
+        mediaType, 
+        isPPV: isPPV === 'true' || isPPV === true, 
+        price: price ? parseFloat(price) : 0, 
+        userId 
+      },
       include: { user: { select: { username: true } } }
     });
     
     res.status(201).json({ message: 'Publicado exitosamente ⚡', post: newPost });
   } catch (error) { 
+    console.error("🔥 ERROR CRÍTICO AL PUBLICAR:", error); // <-- Para ver qué pasa en Coolify
     res.status(500).json({ error: 'Fallo al publicar.' }); 
   }
 };
