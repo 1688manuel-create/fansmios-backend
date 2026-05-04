@@ -6,7 +6,7 @@ const userController = require('../controllers/userController');
 // 🔥 Importamos Multer para manejar la subida de múltiples imágenes
 const upload = require('../utils/multerConfig'); 
 
-// Importamos a nuestros guardias de seguridad
+// Importamos a nuestros guardias de seguridad (Aquí está la clave)
 const { verifyToken, isCreator, isAdmin } = require('../middlewares/authMiddleware');
 
 // 🟢 RUTA DE FAN (Solo requiere estar logueado para pasar)
@@ -16,8 +16,6 @@ router.post('/become-creator', verifyToken, userController.becomeCreator);
 router.get('/profile', verifyToken, userController.getProfile);
 
 // 👑 RUTA DE EDITAR PERFIL (Fotos + Datos)
-// Quitamos 'isCreator' para darle LIBERTAD TOTAL AL ADMIN. El controlador ya se encarga de la seguridad.
-// Usamos upload.fields para atrapar las dos fotos en una sola petición.
 router.put(
   '/profile', 
   verifyToken, 
@@ -41,7 +39,7 @@ router.post('/:id/follow', verifyToken, userController.toggleFollow);
 router.put('/settings/email', verifyToken, userController.updateEmail);
 router.put('/settings/password', verifyToken, userController.updatePassword);
 
-// 🔔 Actualizar Notificaciones (¡GUARDIA CORREGIDO A verifyToken! 👮‍♂️)
+// 🔔 Actualizar Notificaciones
 router.put('/settings/notifications', verifyToken, userController.updateNotificationSettings);
 
 // 🔔 Rutas de Notificaciones In-App
@@ -53,7 +51,8 @@ router.post('/settings/push-token', verifyToken, userController.savePushToken);
 
 router.get('/vip-story', userController.getVipCreator);
 
-// Asegúrate de que el middleware de autenticación esté presente
-router.post('/:id/block', authMiddleware, userController.blockUser);
+// 🚫 RUTA DE BLOQUEO (CORREGIDA: Ahora usa verifyToken en lugar de authMiddleware)
+// Esto soluciona el ReferenceError que detuvo el despliegue en Coolify.
+router.post('/:id/block', verifyToken, userController.blockUser);
 
 module.exports = router;
