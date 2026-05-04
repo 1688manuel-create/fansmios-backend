@@ -6,7 +6,7 @@ const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 const Sentry = require('@sentry/node'); 
 const http = require('http');
-const { Server } = require('socket.io'); 
+const { Server } = require('socket.io');
 
 // 🔥 EL CADENERO VIP DE LIVEKIT
 const { AccessToken } = require('livekit-server-sdk');

@@ -61,6 +61,6 @@ router.get('/analytics/dashboard', verifyToken, isAdmin, adminAnalyticsControlle
 router.get('/vault', verifyToken, isAdmin, adminController.getPlatformVaultBalance);
 router.post('/vault/withdraw', verifyToken, isAdmin, adminController.withdrawPlatformProfit);
 
-router.post('/vip-commission', verifyToken, adminController.setVipCommission);
+router.post('/vip-commission', verifyToken, isAdmin, adminController.setVipCommission);
 
 module.exports = router;

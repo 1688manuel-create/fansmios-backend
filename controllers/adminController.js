@@ -347,21 +347,42 @@ exports.getAllUsers = async (req, res) => {
 };
 
 // ==========================================
-// 7. OBTENER LISTA DE RETIROS PENDIENTES (Para pagar)
+// 7. OBTENER LISTA DE RETIROS PENDIENTES (NUEVO SISTEMA AUTOMÁTICO 🚀)
 // ==========================================
 exports.getAllWithdrawals = async (req, res) => {
   try {
-    const withdrawals = await prisma.withdrawal.findMany({
+    // 1. Buscamos en la NUEVA tabla automática (PayoutRequest) en lugar de la vieja
+    const payouts = await prisma.payoutRequest.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        creator: { select: { email: true, username: true } }
+        creator: { 
+          select: { 
+            email: true, 
+            username: true,
+            wallet: true // Traemos la wallet para ver el saldo en el Admin
+          } 
+        }
       }
     });
 
-    res.status(200).json({ withdrawals });
+    // 2. 🪄 MAGIA DE COMPATIBILIDAD: Transformamos los datos
+    // Así el Frontend sigue recibiendo las variables con los nombres que ya conoce
+    const formattedWithdrawals = payouts.map(p => ({
+      id: p.id,
+      amount: p.amount,
+      status: p.status,
+      cryptoAddress: p.address,    // Adaptamos 'address' a 'cryptoAddress'
+      cryptoNetwork: p.currency,   // Adaptamos 'currency' a 'cryptoNetwork'
+      adminNotes: p.txHash ? `TX Hash: ${p.txHash}` : null, // Comprobante blockchain
+      createdAt: p.createdAt,
+      creator: p.creator
+    }));
+
+    // El frontend espera un array llamado "withdrawals"
+    res.status(200).json({ withdrawals: formattedWithdrawals });
   } catch (error) {
     console.error('Error al obtener retiros:', error);
-    res.status(500).json({ error: 'Error interno' });
+    res.status(500).json({ error: 'Error interno al cargar solicitudes.' });
   }
 };
 
