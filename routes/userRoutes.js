@@ -53,4 +53,7 @@ router.post('/settings/push-token', verifyToken, userController.savePushToken);
 
 router.get('/vip-story', userController.getVipCreator);
 
+// Asegúrate de que el middleware de autenticación esté presente
+router.post('/:id/block', authMiddleware, userController.blockUser);
+
 module.exports = router;

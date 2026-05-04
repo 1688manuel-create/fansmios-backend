@@ -494,3 +494,40 @@ exports.getVipCreator = async (req, res) => {
     res.status(500).json({ error: 'Error del servidor' });
   }
 };
+
+exports.blockUser = async (req, res) => {
+  try {
+    const { id: targetUserId } = req.params; // ID del "fan grosero"
+    const blockerId = req.user.userId;      // Tu ID
+
+    if (targetUserId === blockerId) {
+      return res.status(400).json({ error: "No puedes bloquearte a ti mismo." });
+    }
+
+    // 1. Crear el bloqueo de forma atómica
+    await prisma.block.upsert({
+      where: {
+        blockerId_blockedId: { blockerId, blockedId: targetUserId }
+      },
+      update: {},
+      create: { blockerId, blockedId: targetUserId }
+    });
+
+    // 2. TÁCTICA DE LIMPIEZA: Eliminar suscripciones o follows mutuos
+    // Esto asegura que el fan grosero desaparezca de tus listas inmediatamente
+    await prisma.subscription.deleteMany({
+      where: {
+        OR: [
+          { creatorId: blockerId, fanId: targetUserId },
+          { creatorId: targetUserId, fanId: blockerId }
+        ]
+      }
+    });
+
+    res.status(200).json({ message: "Usuario aniquilado y bloqueado con éxito. 🚫" });
+
+  } catch (error) {
+    console.error("🚨 Error en el protocolo de bloqueo:", error);
+    res.status(500).json({ error: "Fallo interno al procesar el bloqueo." });
+  }
+};
