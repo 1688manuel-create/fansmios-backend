@@ -68,7 +68,7 @@ exports.requestWithdrawal = async (req, res) => {
     isExpress = isExpress === true || isExpress === 'true';
     const withdrawalAmount = parseFloat(amount); 
     
-    if (!withdrawalAmount || withdrawalAmount < 50) return res.status(400).json({ error: 'El monto mínimo de retiro es de $50.00 USD.' });
+    if (!withdrawalAmount || withdrawalAmount < 1) return res.status(400).json({ error: 'El monto mínimo de retiro es de $1.00 USD.' });
 
     const user = await prisma.user.findUnique({ where: { id: creatorId } });
 
