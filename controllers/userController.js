@@ -497,8 +497,8 @@ exports.getVipCreator = async (req, res) => {
 
 exports.blockUser = async (req, res) => {
   try {
-    const { id: targetUserId } = req.params; // ID del "fan grosero"
-    const blockerId = req.user.userId;      // Tu ID
+    const { id: targetUserId } = req.params; // ID del fan grosero
+    const blockerId = req.user.userId;      // Tu ID (Creador)
 
     if (targetUserId === blockerId) {
       return res.status(400).json({ error: "No puedes bloquearte a ti mismo." });
@@ -513,8 +513,16 @@ exports.blockUser = async (req, res) => {
       create: { blockerId, blockedId: targetUserId }
     });
 
-    // 2. TÁCTICA DE LIMPIEZA: Eliminar suscripciones o follows mutuos
-    // Esto asegura que el fan grosero desaparezca de tus listas inmediatamente
+    // 🔥 TÁCTICA DE ANIKILACIÓN: Borrar comentarios del grosero en MIS posts
+    // Esto limpia tu muro de insultos pasados inmediatamente.
+    await prisma.comment.deleteMany({
+      where: {
+        userId: targetUserId,      // Comentarios del fan bloqueado
+        post: { userId: blockerId } // Que fueron escritos en TUS publicaciones
+      }
+    });
+
+    // 2. Limpiar suscripciones o follows mutuos
     await prisma.subscription.deleteMany({
       where: {
         OR: [
@@ -524,7 +532,7 @@ exports.blockUser = async (req, res) => {
       }
     });
 
-    res.status(200).json({ message: "Usuario aniquilado y bloqueado con éxito. 🚫" });
+    res.status(200).json({ message: "Usuario bloqueado y rastro eliminado con éxito. 🚫" });
 
   } catch (error) {
     console.error("🚨 Error en el protocolo de bloqueo:", error);

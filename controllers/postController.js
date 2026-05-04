@@ -127,7 +127,7 @@ exports.createPost = async (req, res) => {
 };
 
 // ==========================================
-// 2. OBTENER MURO (ALGORITMO DE JERARQUÍA VIP 👑)
+// 2. OBTENER MURO (ALGORITMO DE JERARQUÍA VIP 👑) - ACTUALIZADO 🛡️
 // ==========================================
 exports.getAllPosts = async (req, res) => {
   try {
@@ -144,7 +144,6 @@ exports.getAllPosts = async (req, res) => {
             id: true, username: true, 
             creatorProfile: { select: { profileImage: true } }, 
             subscribers: { where: { fanId: userId } },
-            // 🔥 CLAVE: Traemos solo la promoción más poderosa y activa
             promotions: { where: { active: true, expiresAt: { gt: new Date() } }, take: 1, orderBy: { package: 'desc' } }
           } 
         },
@@ -152,7 +151,17 @@ exports.getAllPosts = async (req, res) => {
         purchases: { where: { fanId: userId } },
         likes: { select: { emoji: true, userId: true } }, 
         comments: { 
-          include: { user: { select: { username: true, id: true, creatorProfile: { select: { profileImage: true } } } } }, 
+          // 🚫 FILTRO DE INVISIBILIDAD: No traer comentarios de gente bloqueada por mí
+          where: {
+            user: {
+              blockedBy: {
+                none: { blockerId: userId }
+              }
+            }
+          },
+          include: { 
+            user: { select: { username: true, id: true, creatorProfile: { select: { profileImage: true } } } } 
+          }, 
           orderBy: { createdAt: 'asc' } 
         } 
       }
@@ -167,11 +176,10 @@ exports.getAllPosts = async (req, res) => {
       if (!hasAccess && !post.isPPV) {
         const sub = post.user.subscribers?.[0];
         if (sub && (sub.status === 'ACTIVE' || sub.status === 'PAST_DUE')) hasAccess = true;
-        else hasAccess = true; // Por ahora abierto, ajustar según tu regla de suscripción
+        else hasAccess = true; // Ajustar según regla de suscripción final
       }
 
       // 🔥 MOTOR DE PESOS (Jerarquía de Pago)
-      // Prisma devuelve un array en promotions, extraemos el primero
       const promoData = post.user.promotions?.[0];
       const activePromo = promoData ? promoData.package : null;
       
@@ -194,7 +202,7 @@ exports.getAllPosts = async (req, res) => {
         weight
       };
 
-      // Si tiene pago, va a la fila VIP (solo si no es el propio usuario para evitar spam)
+      // Clasificación para el ordenamiento VIP
       if (weight > 0 && post.userId !== userId) {
         promotedPosts.push(formattedPost);
       } else {
@@ -207,7 +215,7 @@ exports.getAllPosts = async (req, res) => {
 
     res.status(200).json({ posts: [...promotedPosts, ...organicPosts] });
   } catch (error) { 
-    console.error(error);
+    console.error("🚨 Error en el algoritmo del feed:", error);
     res.status(500).json({ error: 'Error en el algoritmo del feed.' }); 
   }
 };
