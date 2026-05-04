@@ -305,25 +305,68 @@ exports.addComment = async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Error al comentar.' }); }
 };
 
+// ==========================================
+// 8. ELIMINAR POST (Dueño o Admin) 🛡️
+// ==========================================
 exports.deletePost = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId;
+    const userRole = req.user.role; // Extraemos el rol del token (FAN, CREATOR, ADMIN)
+
+    // 1. Buscamos el post para verificar existencia y propiedad
     const post = await prisma.post.findUnique({ where: { id } });
-    if (!post || post.userId !== userId) return res.status(403).json({ error: 'No autorizado.' });
+
+    if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
+
+    // 🛡️ REGLA DE JERARQUÍA: Solo el dueño del post O un ADMIN pueden borrarlo
+    const isOwner = post.userId === userId;
+    const isAdmin = userRole === 'ADMIN';
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ error: 'No tienes autorización para eliminar este contenido.' });
+    }
+
+    // 🌪️ LIMPIEZA DE NUBE (Cloudinary)
+    // Borramos los archivos de la nube para no gastar almacenamiento en contenido eliminado
     if (post.mediaUrl && post.mediaUrl.includes('cloudinary.com')) {
-       // Si es JSON, borrar todos, si es string, borrar uno
        let urls = [];
-       try { urls = JSON.parse(post.mediaUrl); if(!Array.isArray(urls)) urls = [post.mediaUrl]; } catch(e) { urls = [post.mediaUrl]; }
+       try { 
+         // Manejamos si el post tiene múltiples imágenes (JSON) o una sola (String)
+         urls = JSON.parse(post.mediaUrl); 
+         if(!Array.isArray(urls)) urls = [post.mediaUrl]; 
+       } catch(e) { 
+         urls = [post.mediaUrl]; 
+       }
+
        for (const url of urls) {
-         const parts = url.split('/');
-         const publicId = 'fansmio_uploads/' + parts[parts.length - 1].split('.'); 
-         await cloudinary.uploader.destroy(publicId).catch(() => {});
+         try {
+           const parts = url.split('/');
+           // Obtenemos el publicId (nombre del archivo sin extensión)
+           const fileName = parts[parts.length - 1].split('.')[0]; 
+           const publicId = `fansmio_uploads/${fileName}`;
+           
+           await cloudinary.uploader.destroy(publicId);
+           console.log(`☁️ Archivo borrado en Cloudinary: ${publicId}`);
+         } catch (cloudErr) {
+           console.error("⚠️ No se pudo borrar el asset en Cloudinary, procediendo con la BD...");
+         }
        }
     }
+
+    // 2. Aniquilación definitiva en la Base de Datos
     await prisma.post.delete({ where: { id } });
-    res.status(200).json({ message: 'Aniquilado.' });
-  } catch (error) { res.status(500).json({ error: 'Error.' }); }
+
+    res.status(200).json({ 
+      message: isAdmin && !isOwner 
+        ? 'Post eliminado por moderación administrativa 🚫' 
+        : 'Contenido eliminado exitosamente ✅' 
+    });
+
+  } catch (error) { 
+    console.error("🚨 Error crítico al eliminar post:", error);
+    res.status(500).json({ error: 'Fallo interno al procesar la eliminación.' }); 
+  }
 };
 
 exports.deleteComment = async (req, res) => {
