@@ -141,8 +141,15 @@ exports.getAllPosts = async (req, res) => {
       include: {
         user: { 
           select: { 
-            id: true, username: true, 
-            creatorProfile: { select: { profileImage: true } }, 
+            id: true, 
+            username: true, 
+            role: true, // 🔥 ¡AQUÍ ESTABA EL INFILTRADO! Pedimos el rol del usuario
+            creatorProfile: { 
+              select: { 
+                profileImage: true,
+                isVerified: true // 🔥 Y también pedimos la palomita de verificación
+              } 
+            }, 
             subscribers: { where: { fanId: userId } },
             promotions: { where: { active: true, expiresAt: { gt: new Date() } }, take: 1, orderBy: { package: 'desc' } }
           } 
@@ -160,7 +167,14 @@ exports.getAllPosts = async (req, res) => {
             }
           },
           include: { 
-            user: { select: { username: true, id: true, creatorProfile: { select: { profileImage: true } } } } 
+            user: { 
+              select: { 
+                username: true, 
+                id: true, 
+                role: true, // 🔥 También lo inyectamos en los comentarios por si acaso
+                creatorProfile: { select: { profileImage: true, isVerified: true } } 
+              } 
+            } 
           }, 
           orderBy: { createdAt: 'asc' } 
         } 
