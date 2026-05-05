@@ -2,9 +2,6 @@
 
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const muxService = require('../utils/muxService');
-const { jwt } = require('@mux/mux-node'); 
-
 const crypto = require('crypto'); // Herramienta para crear códigos únicos
 
 // ==========================================
@@ -38,7 +35,7 @@ exports.createLiveStream = async (req, res) => {
     // Crear una llave secreta súper rápida para LiveKit
     const superKey = crypto.randomBytes(8).toString('hex');
 
-    // Crear la sala en la base de datos (SIN MUX, pura velocidad)
+    // Crear la sala en la base de datos (Pura velocidad LiveKit)
     const newStream = await prisma.liveStream.create({
       data: {
         creatorId,
@@ -47,7 +44,6 @@ exports.createLiveStream = async (req, res) => {
         price: isPPV ? parseFloat(price) : 0,
         status: 'SCHEDULED',
         streamKey: superKey,
-        // Ya no guardamos playbackId porque no usamos MUX aquí
       }
     });
 
@@ -101,7 +97,7 @@ exports.updateStreamStatus = async (req, res) => {
 };
 
 // ==========================================
-// 3. OBTENER STREAM (🔥 MODO SIMULACIÓN Y DRM BLINDADO)
+// 3. OBTENER STREAM (🔥 LIMPIO, SIN MUX)
 // ==========================================
 exports.getLiveStream = async (req, res) => {
   try {
@@ -119,7 +115,7 @@ exports.getLiveStream = async (req, res) => {
           }
         },
         messages: {
-          include: { user: { select: { username: true } } },
+          include: { user: { select: { username: true, role: true } } },
           orderBy: { createdAt: 'desc' },
           take: 50 // Solo mandamos los últimos 50 para no saturar memoria
         }
@@ -130,54 +126,28 @@ exports.getLiveStream = async (req, res) => {
       return res.status(404).json({ error: 'Transmisión no encontrada o finalizada.' });
     }
 
-    // 🛡️ REGLAS DE NEGOCIO Y ACCESO CORREGIDAS
+    // 🛡️ REGLAS DE ACCESO (PAYWALL)
     let hasAccess = false;
 
     if (stream.creator.id === fanId || req.user?.role === 'ADMIN') {
-      // 1. El creador y el Admin SIEMPRE entran gratis
       hasAccess = true; 
     } else if (stream.isPPV) {
-      // 2. Si la sala tiene CANDADO (isPPV = true), verificamos si compró el ticket
       if (fanId) {
         const ticket = await prisma.transaction.findFirst({
           where: { senderId: fanId, postId: stream.id, type: 'LIVE_TICKET', status: 'COMPLETED' }
         });
-        if (ticket) hasAccess = true; // Pagó, lo dejamos pasar
+        if (ticket) hasAccess = true; 
       }
     } else {
-      // 3. Si la sala NO tiene candado (isPPV = false), es PÚBLICA. Entran todos.
       hasAccess = true;
-    }
-
-    // 🔑 FIRMA CRIPTOGRÁFICA (JWT) O SIMULACIÓN
-    let playbackToken = null;
-    let safePlaybackId = stream.playbackId; // Por defecto mandamos el raw ID
-
-    if (hasAccess && stream.playbackId) {
-      // 🔥 PARCHE: Solo intentamos firmar si las variables de entorno existen y jwt está cargado
-      if (process.env.MUX_SIGNING_KEY_ID && process.env.MUX_SIGNING_KEY_SECRET && jwt && jwt.signPlaybackId) {
-            try {
-              playbackToken = jwt.signPlaybackId(stream.playbackId, {
-                keyId: process.env.MUX_SIGNING_KEY_ID,
-                keySecret: process.env.MUX_SIGNING_KEY_SECRET,
-                expiration: '6h', 
-              });
-              safePlaybackId = stream.playbackId; // 🔥 Dejamos el ID real intacto
-            } catch (err) {
-          console.error('🚨 Error firmando token Mux:', err.message);
-          hasAccess = false; 
-        }
-      } else {
-        console.log('⚠️ [Modo Simulación] Omitiendo firma JWT de MUX porque faltan las llaves reales en .env');
-      }
     }
 
     const responseStream = {
       ...stream,
       streamKey: stream.creator.id === fanId ? stream.streamKey : null,
       messages: hasAccess ? stream.messages.reverse() : [],
-      playbackId: hasAccess ? safePlaybackId : null,
-      playbackToken: hasAccess ? playbackToken : null
+      playbackId: null, // Mux fue eliminado
+      playbackToken: null
     };
 
     res.status(200).json({ hasAccess, stream: responseStream });
@@ -189,111 +159,89 @@ exports.getLiveStream = async (req, res) => {
 };
 
 // ==========================================
-// 4. ENVIAR MENSAJE (💎 CÁLCULO DE ESTATUS VIP)
+// 4. ENVIAR MENSAJE (API Fallback con Comisiones Dinámicas)
 // ==========================================
 exports.sendLiveMessage = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { streamId, content, isDonation, amount } = req.body;
 
-    if (!streamId || !content) {
-      return res.status(400).json({ error: 'Datos incompletos' });
-    }
+    if (!streamId || !content) return res.status(400).json({ error: 'Datos incompletos' });
 
-    // 1. Buscamos de quién es el stream para ver cuánto le ha pagado este fan
     const stream = await prisma.liveStream.findUnique({
       where: { id: streamId },
-      select: { creatorId: true }
+      include: { creator: { include: { creatorProfile: true } } }
     });
 
-    let fanLevel = 'NEW'; // Nivel por defecto
+    if (!stream) return res.status(404).json({ error: 'Stream no encontrado' });
 
-    if (stream && userId !== stream.creatorId && req.user.role !== 'ADMIN') {
-      // 2. Sumamos TODO el dinero que este fan le ha dado al creador (Histórico)
+    let fanLevel = 'NEW';
+    if (userId !== stream.creatorId && req.user.role !== 'ADMIN') {
       const historicalSpends = await prisma.transaction.aggregate({
-        where: {
-          senderId: userId,
-          receiverId: stream.creatorId,
-          status: 'COMPLETED'
-        },
+        where: { senderId: userId, receiverId: stream.creatorId, status: 'COMPLETED' },
         _sum: { amount: true }
       });
-
       const totalSpent = historicalSpends._sum.amount || 0;
-
-      // 3. Asignación de Rangos (Gamificación Pura)
       if (totalSpent >= 1000) fanLevel = 'DIAMOND';
       else if (totalSpent >= 500) fanLevel = 'GOLD';
       else if (totalSpent >= 100) fanLevel = 'SILVER';
       else if (totalSpent >= 10) fanLevel = 'BRONZE';
-    } else if (userId === stream?.creatorId) {
-      fanLevel = 'CREATOR';
-    } else if (req.user.role === 'ADMIN') {
-      fanLevel = 'ADMIN';
-    }
+    } else if (userId === stream.creatorId) fanLevel = 'CREATOR';
+    else if (req.user.role === 'ADMIN') fanLevel = 'ADMIN';
 
-    // 🔥 NUEVO: Movimiento de dinero para la Wallet y el Dashboard
+    // 🔥 COMISIONES DINÁMICAS (Si llega a entrar una donación por API en vez de Socket)
     if (isDonation && parseFloat(amount) > 0) {
       const tipAmount = parseFloat(amount);
       
       try {
-        // 1. Sumamos el dinero a la cuenta del Creador (A su tabla Wallet separada)
-        await prisma.wallet.upsert({ 
-          where: { userId: stream.creatorId },
-          update: { balance: { increment: tipAmount } },
-          create: { userId: stream.creatorId, balance: tipAmount } 
-        });
+        const globalSettings = await prisma.platformSetting.findFirst() || { feeTips: 20 };
+        let feePercent = globalSettings.feeTips / 100;
+        
+        if (stream.creator?.creatorProfile?.customFeeTips != null) {
+          feePercent = stream.creator.creatorProfile.customFeeTips / 100;
+        }
 
-        // 2. Calculamos las comisiones (Obligatorias en tu schema)
-        const platformFeePercent = 20; // O el porcentaje que manejes
-        const feeAmount = (tipAmount * platformFeePercent) / 100;
+        const feeAmount = tipAmount * feePercent;
         const netToCreator = tipAmount - feeAmount;
 
-        // 3. Creamos el recibo MÁS SEGURO
-        await prisma.transaction.create({
-          data: {
-            senderId: userId,
-            receiverId: stream.creatorId,
-            amount: tipAmount,
-            platformFee: feeAmount, // Tu schema lo exige
-            netAmount: netToCreator, // Tu schema lo exige
-            type: 'TIP', // Tu schema SÍ tiene la palabra TIP
-            status: 'COMPLETED'
-          }
-        });
-        console.log(`💰 ÉXITO: $${tipAmount} USD sumados a la Wallet de ${stream.creatorId}`);
+        await prisma.$transaction([
+          prisma.wallet.upsert({ 
+            where: { userId: stream.creatorId },
+            update: { balance: { increment: netToCreator } },
+            create: { userId: stream.creatorId, balance: netToCreator } 
+          }),
+          prisma.wallet.update({
+            where: { userId: userId },
+            data: { balance: { decrement: tipAmount } }
+          }),
+          prisma.transaction.create({
+            data: {
+              senderId: userId, receiverId: stream.creatorId,
+              amount: tipAmount, platformFee: feeAmount, netAmount: netToCreator,
+              type: 'TIP', status: 'COMPLETED', attachedMessage: content
+            }
+          })
+        ]);
+        console.log(`💰 API-TIP: $${tipAmount} USD a ${stream.creatorId}`);
       } catch (moneyError) {
-        console.error('🚨 ERROR FINANCIERO:', moneyError.message);
+        console.error('🚨 ERROR FINANCIERO API:', moneyError.message);
+        return res.status(400).json({ error: 'Saldo insuficiente o error financiero.' });
       }
     }
 
-    // 4. Guardamos el mensaje en la BD
     const newMessage = await prisma.liveChatMessage.create({
       data: {
-        streamId,
-        userId,
-        content,
+        streamId, userId, content,
         isDonation: isDonation || false,
         amount: isDonation ? parseFloat(amount) : 0
       },
-      include: {
-        user: { select: { username: true, role: true } }
-      }
+      include: { user: { select: { username: true, role: true } } }
     });
 
-    // 5. Devolvemos el mensaje con el nivel de fan adjunto para que el Frontend lo pinte
-    const chatMessageWithLevel = {
-      ...newMessage,
-      fanLevel // Inyectamos el nivel calculado en tiempo real
-    };
-
-    res.status(201).json({
-      message: 'Mensaje enviado',
-      chatMessage: chatMessageWithLevel
-    });
+    res.status(201).json({ message: 'Mensaje enviado', chatMessage: { ...newMessage, fanLevel } });
 
   } catch (error) {
-    console.error('❌ Error al enviar mensaje:', error);
+    console.error('❌ Error al enviar mensaje API:', error);
     res.status(500).json({ error: 'Error interno' });
   }
 };
@@ -308,8 +256,7 @@ exports.getFeedStreams = async (req, res) => {
       include: {
         creator: {
           select: {
-            id: true,
-            username: true,
+            id: true, username: true,
             creatorProfile: { select: { profileImage: true, coverImage: true, category: true } }
           }
         },
@@ -317,9 +264,7 @@ exports.getFeedStreams = async (req, res) => {
       },
       orderBy: { createdAt: 'desc' }
     });
-
     res.status(200).json({ activeStreams });
-
   } catch (error) {
     console.error('❌ Error al obtener streams activos:', error);
     res.status(500).json({ error: 'Error interno' });
@@ -327,51 +272,61 @@ exports.getFeedStreams = async (req, res) => {
 };
 
 // ==========================================
-// 6. COMPRAR TICKET VIP AL INSTANTE (ONE-CLICK)
+// 6. COMPRAR TICKET VIP AL INSTANTE (ONE-CLICK) 🔥 BLINDADO
 // ==========================================
 exports.buyLiveTicket = async (req, res) => {
   try {
     const fanId = req.user.userId;
     const { streamId, amount } = req.body;
 
-    // 1. Revisamos la billetera del fan
+    const stream = await prisma.liveStream.findUnique({ 
+      where: { id: streamId },
+      include: { creator: { include: { creatorProfile: true } } }
+    });
+
+    if (!stream) return res.status(404).json({ error: 'Transmisión no encontrada.' });
+    if (stream.creatorId === fanId) return res.status(400).json({ error: 'No puedes comprarte un ticket a ti mismo.' });
+
     const fanWallet = await prisma.wallet.findUnique({ where: { userId: fanId } });
     if (!fanWallet || fanWallet.balance < amount) {
       return res.status(400).json({ error: 'Saldo insuficiente. Recarga tu Covra Wallet.' });
     }
 
-    const stream = await prisma.liveStream.findUnique({ where: { id: streamId } });
+    // 🔥 COMISIONES DINÁMICAS PARA ENTRADAS VIP
+    const globalSettings = await prisma.platformSetting.findFirst() || { feePPV: 20 };
+    let feePercent = globalSettings.feePPV / 100; // Asumimos que usas feePPV para accesos
 
-    // 2. Le descontamos el dinero al fan
-    await prisma.wallet.update({
-      where: { userId: fanId },
-      data: { balance: { decrement: amount } }
-    });
+    if (stream.creator?.creatorProfile?.customFeePPV != null) {
+      feePercent = stream.creator.creatorProfile.customFeePPV / 100;
+    }
 
-    // 3. Calculamos la comisión (ej. 20%) y le pagamos al creador
-    const platformFeePercent = 20; 
-    const feeAmount = (amount * platformFeePercent) / 100;
+    const feeAmount = amount * feePercent;
     const netAmount = amount - feeAmount;
 
-    await prisma.wallet.upsert({
-      where: { userId: stream.creatorId },
-      update: { balance: { increment: netAmount } },
-      create: { userId: stream.creatorId, balance: netAmount }
-    });
-
-    // 4. Imprimimos el ticket digital en la base de datos
-    await prisma.transaction.create({
-      data: {
-        senderId: fanId,
-        receiverId: stream.creatorId,
-        amount: amount,
-        platformFee: feeAmount,
-        netAmount: netAmount,
-        type: 'LIVE_TICKET',
-        status: 'COMPLETED',
-        postId: streamId
-      }
-    });
+    // Ejecutar transferencia atómica
+    await prisma.$transaction([
+      prisma.wallet.update({
+        where: { userId: fanId },
+        data: { balance: { decrement: amount } }
+      }),
+      prisma.wallet.upsert({
+        where: { userId: stream.creatorId },
+        update: { balance: { increment: netAmount } },
+        create: { userId: stream.creatorId, balance: netAmount }
+      }),
+      prisma.transaction.create({
+        data: {
+          senderId: fanId,
+          receiverId: stream.creatorId,
+          amount: amount,
+          platformFee: feeAmount,
+          netAmount: netAmount,
+          type: 'LIVE_TICKET',
+          status: 'COMPLETED',
+          postId: streamId
+        }
+      })
+    ]);
 
     res.status(200).json({ success: true, message: '¡Ticket VIP Desbloqueado!' });
 
