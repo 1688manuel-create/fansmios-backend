@@ -335,3 +335,94 @@ exports.buyLiveTicket = async (req, res) => {
     res.status(500).json({ error: 'Error procesando el pago VIP.' });
   }
 };
+
+// ==========================================
+// 🎯 FASE 1: MENÚ DE RETOS PRIVADOS
+// ==========================================
+
+// 1. Crear un nuevo reto (Solo Creador)
+exports.createChallenge = async (req, res) => {
+  try {
+    const creatorId = req.user.userId;
+    const { title, description, price } = req.body;
+
+    if (!title || !price || price <= 0) {
+      return res.status(400).json({ error: 'Título y precio mayor a 0 son obligatorios.' });
+    }
+
+    const newChallenge = await prisma.liveChallenge.create({
+      data: {
+        creatorId,
+        title,
+        description,
+        price: parseFloat(price),
+        isActive: true
+      }
+    });
+
+    res.status(201).json({ message: 'Reto creado con éxito 🎯', challenge: newChallenge });
+  } catch (error) {
+    console.error('❌ Error creando reto:', error);
+    res.status(500).json({ error: 'Error interno al crear el reto.' });
+  }
+};
+
+// 2. Obtener los retos activos de un creador (Público)
+exports.getCreatorChallenges = async (req, res) => {
+  try {
+    const { creatorId } = req.params;
+    const challenges = await prisma.liveChallenge.findMany({
+      where: { creatorId, isActive: true },
+      orderBy: { price: 'asc' } // Los ordenamos del más barato al más caro
+    });
+    res.status(200).json({ challenges });
+  } catch (error) {
+    console.error('❌ Error obteniendo retos:', error);
+    res.status(500).json({ error: 'Error al obtener los retos.' });
+  }
+};
+
+// 3. Apagar/Prender un reto (Solo Creador)
+exports.toggleChallenge = async (req, res) => {
+  try {
+    const creatorId = req.user.userId;
+    const { challengeId } = req.params;
+    const { isActive } = req.body;
+
+    const challenge = await prisma.liveChallenge.findUnique({ where: { id: challengeId } });
+    
+    if (!challenge || challenge.creatorId !== creatorId) {
+      return res.status(403).json({ error: 'No tienes permiso para modificar este reto.' });
+    }
+
+    const updated = await prisma.liveChallenge.update({
+      where: { id: challengeId },
+      data: { isActive }
+    });
+
+    res.status(200).json({ message: 'Estado del reto actualizado.', challenge: updated });
+  } catch (error) {
+    console.error('❌ Error actualizando reto:', error);
+    res.status(500).json({ error: 'Error al modificar el reto.' });
+  }
+};
+
+// 4. Eliminar reto para siempre (Solo Creador)
+exports.deleteChallenge = async (req, res) => {
+  try {
+    const creatorId = req.user.userId;
+    const { challengeId } = req.params;
+
+    const challenge = await prisma.liveChallenge.findUnique({ where: { id: challengeId } });
+    
+    if (!challenge || challenge.creatorId !== creatorId) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar este reto.' });
+    }
+
+    await prisma.liveChallenge.delete({ where: { id: challengeId } });
+    res.status(200).json({ message: 'Reto eliminado de tu arsenal 🗑️' });
+  } catch (error) {
+    console.error('❌ Error eliminando reto:', error);
+    res.status(500).json({ error: 'Error al eliminar el reto.' });
+  }
+};
