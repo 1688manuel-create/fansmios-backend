@@ -155,6 +155,7 @@ model User {
   storyViews StoryView[] @relation("FanStoryViews")
 
   liveStreams      LiveStream[]      @relation("CreatorLiveStreams")
+  liveChallenges LiveChallenge[] @relation("CreatorLiveChallenges")
   liveChatMessages LiveChatMessage[] @relation("UserLiveChatMessages")
 
   blocks           Block[]        @relation("BlockingUsers")
@@ -651,4 +652,20 @@ model Gift {
   price       Float    
   tier        String   @default("BASIC") 
   createdAt   DateTime @default(now())
+}
+
+// ==========================================
+// 🎯 RETOS PRIVADOS EN VIVO (FASE 1)
+// ==========================================
+model LiveChallenge {
+  id          String   @id @default(uuid())
+  creatorId   String
+  title       String   // Ej: "Bailar 10 segundos"
+  description String?  // Ej: "Con la canción que tú elijas"
+  price       Float    // Precio en USD
+  isActive    Boolean  @default(true) // Para que el creador lo apague si se cansa
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  creator     User     @relation("CreatorLiveChallenges", fields: [creatorId], references: [id], onDelete: Cascade)
 }
