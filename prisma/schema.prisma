@@ -229,6 +229,9 @@ model CreatorProfile {
   customFeePPV          Float?
   customFeeTips         Float?
   customFeeLive         Float?
+  
+  // 🔥 FASE 5: JUGUETES INTERACTIVOS
+  lovenseWebhook        String?
 }
 
 model Promotion {
