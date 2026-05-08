@@ -38,11 +38,10 @@ exports.becomeCreator = async (req, res) => {
 };
 
 // ==========================================
-// 2. CREADOR (Y ADMIN): Editar Perfil Público (BASE64 + FIX REAL)
+// 2. CREADOR (Y ADMIN): Editar Perfil Público
 // ==========================================
 exports.updateProfile = async (req, res) => {
   try {
-    // ☢️ EXTRAEMOS LAS IMÁGENES BASE64 DEL PAQUETE
     const { 
       username, name, bio, monthlyPrice, category, welcomeMessage, 
       hideStats, blockedCountries, instagram, twitter, website,
@@ -53,11 +52,6 @@ exports.updateProfile = async (req, res) => {
     const targetUserId = (req.user.role === 'ADMIN' && bodyTargetUserId) 
                           ? bodyTargetUserId 
                           : req.user.userId;
-
-    console.log("====================================");
-    console.log("📥 DATOS RECIBIDOS DESDE EL FRONTEND");
-    console.log("🧠 targetUserId a editar:", targetUserId);
-    console.log("====================================");
 
     // 1. ACTUALIZAR TABLA PRINCIPAL (USER)
     const userUpdateData = {};
@@ -79,7 +73,7 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    // 2. PREPARAR DATOS DEL PERFIL (CONSTRUCCIÓN DINÁMICA)
+    // 2. PREPARAR DATOS DEL PERFIL
     const profileData = {};
 
     if (bio !== undefined) profileData.bio = bio;
@@ -92,11 +86,8 @@ exports.updateProfile = async (req, res) => {
     if (twitter !== undefined) profileData.twitter = twitter;
     if (website !== undefined) profileData.website = website;
 
-    // ==========================
-    // 3. PROCESAMIENTO DE IMÁGENES BASE64 ☢️
-    // ==========================
+    // 3. PROCESAMIENTO DE IMÁGENES BASE64
     if (profileImageBase64) {
-      console.log("📸 Procesando Foto de Perfil en texto Base64...");
       const result = await cloudinary.uploader.upload(profileImageBase64, { 
         folder: "fansmio_profiles",
         resource_type: "auto"
@@ -105,7 +96,6 @@ exports.updateProfile = async (req, res) => {
     }
 
     if (coverImageBase64) {
-      console.log("🖼️ Procesando Foto de Portada en texto Base64...");
       const result = await cloudinary.uploader.upload(coverImageBase64, { 
         folder: "fansmio_profiles",
         resource_type: "auto"
@@ -122,8 +112,6 @@ exports.updateProfile = async (req, res) => {
         ...profileData
       }
     });
-
-    console.log("✅ PERFIL GUARDADO EXITOSAMENTE:", updatedProfile.id);
 
     res.status(200).json({ message: 'Perfil actualizado exitosamente', profile: updatedProfile });
 
@@ -157,7 +145,7 @@ exports.getAllUsers = async (req, res) => {
 };
 
 // ==========================================
-// 4. OBTENER PERFIL DEL USUARIO (Blindado 🛡️ + Bóveda 💰)
+// 4. OBTENER PERFIL DEL USUARIO
 // ==========================================
 exports.getProfile = async (req, res) => {
   try {
@@ -165,7 +153,7 @@ exports.getProfile = async (req, res) => {
       where: { id: req.user.userId },
       include: { 
         creatorProfile: true,
-        wallet: true // 👈 ¡NUEVO! Le ordenamos a Prisma que traiga la Bóveda
+        wallet: true 
       }
     });
 
@@ -173,24 +161,14 @@ exports.getProfile = async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    // 🛡️ ESCUDO ANTI-COLAPSO PARA ADMINS Y NUEVOS
     if (!user.creatorProfile) {
       user.creatorProfile = {
-        bio: "",
-        monthlyPrice: 0,
-        category: "General",
-        welcomeMessage: "",
-        hideStats: false,
-        blockedCountries: "",
-        instagram: "",
-        twitter: "",
-        website: "",
-        profileImage: null,
-        coverImage: null
+        bio: "", monthlyPrice: 0, category: "General", welcomeMessage: "",
+        hideStats: false, blockedCountries: "", instagram: "", twitter: "",
+        website: "", profileImage: null, coverImage: null
       };
     }
 
-    // 💰 ¡NUEVO! Empaquetamos el saldo de la bóveda para que el Frontend lo entienda fácil
     user.walletBalance = user.wallet?.balance || 0;
 
     res.status(200).json({ user });
@@ -201,7 +179,7 @@ exports.getProfile = async (req, res) => {
 };
 
 // ==========================================
-// 5. SEGUIR / DEJAR DE SEGUIR A UN USUARIO (FOLLOW)
+// 5. SEGUIR / DEJAR DE SEGUIR A UN USUARIO
 // ==========================================
 exports.toggleFollow = async (req, res) => {
   try {
@@ -213,18 +191,14 @@ exports.toggleFollow = async (req, res) => {
     }
 
     const existingFollow = await prisma.follow.findUnique({
-      where: {
-        followerId_followingId: { followerId, followingId }
-      }
+      where: { followerId_followingId: { followerId, followingId } }
     });
 
     if (existingFollow) {
       await prisma.follow.delete({ where: { id: existingFollow.id } });
       return res.status(200).json({ message: "Has dejado de seguir a este creador", isFollowing: false });
     } else {
-      await prisma.follow.create({
-        data: { followerId, followingId }
-      });
+      await prisma.follow.create({ data: { followerId, followingId } });
       return res.status(200).json({ message: "Ahora sigues a este creador", isFollowing: true });
     }
   } catch (error) {
@@ -234,172 +208,98 @@ exports.toggleFollow = async (req, res) => {
 };
 
 // ==========================================
-// 🔥 NUEVO: ACTUALIZAR EMAIL
+// ACTUALIZAR EMAIL, CONTRASEÑA, NOTIFICACIONES
 // ==========================================
 exports.updateEmail = async (req, res) => {
   try {
     const { newEmail } = req.body;
     const userId = req.user.userId;
-
     if (!newEmail) return res.status(400).json({ error: 'Debes proporcionar un nuevo email.' });
-
     const existingUser = await prisma.user.findUnique({ where: { email: newEmail } });
     if (existingUser) return res.status(400).json({ error: 'Este correo ya está en uso por otra cuenta.' });
-
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { email: newEmail }
-    });
-
+    const updatedUser = await prisma.user.update({ where: { id: userId }, data: { email: newEmail } });
     res.status(200).json({ message: '✅ Email actualizado correctamente.', user: { email: updatedUser.email } });
   } catch (error) {
-    console.error("Error al actualizar email:", error);
     res.status(500).json({ error: 'Error interno al actualizar el email.' });
   }
 };
 
-// ==========================================
-// 🔥 NUEVO: ACTUALIZAR CONTRASEÑA
-// ==========================================
 exports.updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
     const userId = req.user.userId;
-
     if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Faltan campos obligatorios.' });
-
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
-
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) return res.status(400).json({ error: 'La contraseña actual es incorrecta. 🛑' });
-
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
-
-    await prisma.user.update({
-      where: { id: userId },
-      data: { password: hashedPassword }
-    });
-
-    res.status(200).json({ message: '✅ Contraseña actualizada correctamente. (Tu seguridad ha mejorado).' });
+    await prisma.user.update({ where: { id: userId }, data: { password: hashedPassword } });
+    res.status(200).json({ message: '✅ Contraseña actualizada correctamente.' });
   } catch (error) {
-    console.error("Error al actualizar contraseña:", error);
     res.status(500).json({ error: 'Error interno al actualizar la contraseña.' });
   }
 };
 
-// ==========================================
-// 🔥 NUEVO: ACTUALIZAR PREFERENCIAS DE NOTIFICACIONES
-// ==========================================
 exports.updateNotificationSettings = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { emailPromotions, emailNewMessages, emailSales } = req.body;
-
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: {
-        emailPromotions: emailPromotions,
-        emailNewMessages: emailNewMessages,
-        emailSales: emailSales
-      }
+      data: { emailPromotions, emailNewMessages, emailSales }
     });
-
-    res.status(200).json({ 
-      message: '✅ Preferencias de notificaciones guardadas.',
-      user: {
-        id: updatedUser.id,
-        email: updatedUser.email,
-        username: updatedUser.username,
-        role: updatedUser.role,
-        emailPromotions: updatedUser.emailPromotions,
-        emailNewMessages: updatedUser.emailNewMessages,
-        emailSales: updatedUser.emailSales
-      }
-    });
+    res.status(200).json({ message: '✅ Preferencias guardadas.', user: updatedUser });
   } catch (error) {
-    console.error("Error al guardar notificaciones:", error);
-    res.status(500).json({ error: 'Error interno al guardar preferencias.' });
+    res.status(500).json({ error: 'Error interno.' });
   }
 };
 
-// ==========================================
-// 🔔 1. OBTENER MIS NOTIFICACIONES (IN-APP)
-// ==========================================
 exports.getMyNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
-    
-    const notifications = await prisma.notification.findMany({
-      where: { userId: userId },
-      orderBy: { createdAt: 'desc' },
-      take: 50 
-    });
-
-    const unreadCount = await prisma.notification.count({
-      where: { userId: userId, isRead: false }
-    });
-
+    const notifications = await prisma.notification.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 50 });
+    const unreadCount = await prisma.notification.count({ where: { userId, isRead: false } });
     res.status(200).json({ notifications, unreadCount });
   } catch (error) {
-    console.error("Error al obtener notificaciones:", error);
-    res.status(500).json({ error: 'Error al cargar el centro de notificaciones.' });
+    res.status(500).json({ error: 'Error al cargar notificaciones.' });
   }
 };
 
-// ==========================================
-// 🔔 2. MARCAR TODAS COMO LEÍDAS
-// ==========================================
 exports.markNotificationsAsRead = async (req, res) => {
   try {
     const userId = req.user.userId;
-    
-    await prisma.notification.updateMany({
-      where: { userId: userId, isRead: false },
-      data: { isRead: true }
-    });
-
-    res.status(200).json({ message: 'Todas las notificaciones marcadas como leídas ✅' });
+    await prisma.notification.updateMany({ where: { userId, isRead: false }, data: { isRead: true } });
+    res.status(200).json({ message: 'Todas leídas ✅' });
   } catch (error) {
-    console.error("Error al marcar como leídas:", error);
-    res.status(500).json({ error: 'Error al actualizar notificaciones.' });
+    res.status(500).json({ error: 'Error al actualizar.' });
   }
 };
 
-// ==========================================
-// 📱 GUARDAR TOKEN PUSH (FIREBASE)
-// ==========================================
 exports.savePushToken = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { fcmToken } = req.body;
-
     if (!fcmToken) return res.status(400).json({ error: 'Falta el token' });
-
-    await prisma.user.update({
-      where: { id: userId },
-      data: { fcmToken: fcmToken }
-    });
-
-    res.status(200).json({ message: '✅ Dispositivo vinculado para notificaciones Push.' });
+    await prisma.user.update({ where: { id: userId }, data: { fcmToken } });
+    res.status(200).json({ message: '✅ Dispositivo vinculado.' });
   } catch (error) {
-    console.error("Error al guardar token Push:", error);
     res.status(500).json({ error: 'Error interno.' });
   }
 };
 
 // ==========================================
-// OBTENER CREADORES EN TENDENCIA (TRENDING VIP)
+// 🔥 OBTENER CREADORES EN TENDENCIA (AHORA CON FUEGO Y LEYENDA)
 // ==========================================
 exports.getTrendingCreators = async (req, res) => {
   try {
-    // 🔥 BUSCAMOS CREADORES CON PAQUETES ACTIVOS (BASIC o PRO)
     const promotedCreators = await prisma.promotion.findMany({
       where: {
         active: true,
-        expiresAt: { gt: new Date() }, // Que no haya expirado
-        package: { in: ['BASIC', 'PRO'] } // El paquete GOD sale arriba, estos salen en el lateral
+        expiresAt: { gt: new Date() }, 
+        // 🔥 INYECTAMOS 'LEGEND' PARA QUE SALGAN EN EL CARRUSEL
+        package: { in: ['BASIC', 'PRO', 'LEGEND'] } 
       },
       include: {
         creator: {
@@ -408,6 +308,8 @@ exports.getTrendingCreators = async (req, res) => {
             username: true,
             name: true,
             role: true,
+            // 🔥 EXTRAEMOS EL DATO DEL FUEGO DESDE LA BASE DE DATOS
+            hasFireBorder: true, 
             creatorProfile: {
               select: {
                 profileImage: true
@@ -417,19 +319,20 @@ exports.getTrendingCreators = async (req, res) => {
         }
       },
       orderBy: {
-        package: 'desc' // PRO primero, luego BASIC
+        package: 'desc' 
       },
-      take: 5 // Top 5 de los que pagaron
+      take: 5 
     });
 
-    // Si hay menos de 5 con promoción, rellenamos con creadores recientes para que no se vea vacío
     let formattedTrending = promotedCreators.map(promo => ({
       id: promo.creator.id,
       username: promo.creator.username,
       name: promo.creator.name || promo.creator.username, 
       isOnline: Math.random() > 0.5, 
       creatorProfile: promo.creator.creatorProfile,
-      isPromoted: true // Bandera táctica para el frontend
+      isPromoted: true,
+      // 🔥 LE PASAMOS EL FUEGO AL FRONTEND
+      hasFireBorder: promo.creator.hasFireBorder || false 
     }));
 
     if (formattedTrending.length < 5) {
@@ -444,6 +347,8 @@ exports.getTrendingCreators = async (req, res) => {
         orderBy: { createdAt: 'desc' },
         select: {
           id: true, username: true, name: true, role: true,
+          // 🔥 TAMBIÉN REVISAMOS SI LOS DE RELLENO TIENEN FUEGO
+          hasFireBorder: true, 
           creatorProfile: { select: { profileImage: true } }
         }
       });
@@ -454,7 +359,9 @@ exports.getTrendingCreators = async (req, res) => {
         name: creator.name || creator.username,
         isOnline: Math.random() > 0.5,
         creatorProfile: creator.creatorProfile,
-        isPromoted: false
+        isPromoted: false,
+        // 🔥 LE PASAMOS EL FUEGO AL FRONTEND
+        hasFireBorder: creator.hasFireBorder || false 
       }));
 
       formattedTrending = [...formattedTrending, ...formattedFillers];
@@ -482,6 +389,8 @@ exports.getVipCreator = async (req, res) => {
           select: {
             id: true,
             username: true,
+            // 🔥 POR SI ACASO EL DIOS TAMBIÉN COMPRÓ FUEGO
+            hasFireBorder: true,
             creatorProfile: { select: { profileImage: true } }
           }
         }
@@ -497,32 +406,23 @@ exports.getVipCreator = async (req, res) => {
 
 exports.blockUser = async (req, res) => {
   try {
-    const { id: targetUserId } = req.params; // ID del fan grosero
-    const blockerId = req.user.userId;      // Tu ID (Creador)
+    const { id: targetUserId } = req.params; 
+    const blockerId = req.user.userId;      
 
     if (targetUserId === blockerId) {
       return res.status(400).json({ error: "No puedes bloquearte a ti mismo." });
     }
 
-    // 1. Crear el bloqueo de forma atómica
     await prisma.block.upsert({
-      where: {
-        blockerId_blockedId: { blockerId, blockedId: targetUserId }
-      },
+      where: { blockerId_blockedId: { blockerId, blockedId: targetUserId } },
       update: {},
       create: { blockerId, blockedId: targetUserId }
     });
 
-    // 🔥 TÁCTICA DE ANIKILACIÓN: Borrar comentarios del grosero en MIS posts
-    // Esto limpia tu muro de insultos pasados inmediatamente.
     await prisma.comment.deleteMany({
-      where: {
-        userId: targetUserId,      // Comentarios del fan bloqueado
-        post: { userId: blockerId } // Que fueron escritos en TUS publicaciones
-      }
+      where: { userId: targetUserId, post: { userId: blockerId } }
     });
 
-    // 2. Limpiar suscripciones o follows mutuos
     await prisma.subscription.deleteMany({
       where: {
         OR: [

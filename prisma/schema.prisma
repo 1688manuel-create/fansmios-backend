@@ -98,6 +98,7 @@ model User {
   passwordHash     String
   name             String?
   role             Role       @default(FAN)
+  hasFireBorder Boolean @default(false)
   status           UserStatus @default(ACTIVE)
 
   emailNotifications Boolean @default(true)
@@ -178,6 +179,7 @@ model User {
 
   seriesCreated    Series[]         @relation("UserSeries")
   seriesPurchased  SeriesPurchase[] @relation("FanSeriesPurchases")
+
 }
 
 model Session {
