@@ -85,6 +85,7 @@ enum PromoPackage {
   BASIC
   PRO
   GOD
+  LEGEND // 🔥 AQUÍ ESTÁ LA CORRECCIÓN CLAVE PARA EL ERROR 400
 }
 
 // ------------------------------------------------------
@@ -98,7 +99,7 @@ model User {
   passwordHash     String
   name             String?
   role             Role       @default(FAN)
-  hasFireBorder Boolean @default(false)
+  hasFireBorder    Boolean    @default(false)
   status           UserStatus @default(ACTIVE)
 
   emailNotifications Boolean @default(true)
@@ -145,9 +146,9 @@ model User {
   platformWithdrawals PlatformWithdrawal[]
 
   sentMessages       Message[]      @relation("SentMessages")
-  receivedMessages Message[]      @relation("ReceivedMessages")
-  creatorChats     Conversation[] @relation("CreatorConversations")
-  fanChats         Conversation[] @relation("FanConversations")
+  receivedMessages   Message[]      @relation("ReceivedMessages")
+  creatorChats       Conversation[] @relation("CreatorConversations")
+  fanChats           Conversation[] @relation("FanConversations")
 
   reportsMade      Report[] @relation("Reporter")
   reportsReceived  Report[] @relation("ReportedUser")
@@ -156,7 +157,7 @@ model User {
   storyViews StoryView[] @relation("FanStoryViews")
 
   liveStreams      LiveStream[]      @relation("CreatorLiveStreams")
-  liveChallenges LiveChallenge[] @relation("CreatorLiveChallenges")
+  liveChallenges   LiveChallenge[]   @relation("CreatorLiveChallenges")
   liveChatMessages LiveChatMessage[] @relation("UserLiveChatMessages")
 
   blocks           Block[]        @relation("BlockingUsers")
@@ -179,7 +180,6 @@ model User {
 
   seriesCreated    Series[]         @relation("UserSeries")
   seriesPurchased  SeriesPurchase[] @relation("FanSeriesPurchases")
-
 }
 
 model Session {
@@ -651,12 +651,12 @@ model PlatformWithdrawal {
 // 💎 REGALOS EN DÓLARES REALES
 // ==========================================
 model Gift {
-  id          String   @id @default(uuid())
-  name        String
-  icon        String   
-  price       Float    
-  tier        String   @default("BASIC") 
-  createdAt   DateTime @default(now())
+  id        String   @id @default(uuid())
+  name      String
+  icon      String   
+  price     Float    
+  tier      String   @default("BASIC") 
+  createdAt DateTime @default(now())
 }
 
 // ==========================================
