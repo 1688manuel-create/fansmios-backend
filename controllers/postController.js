@@ -24,7 +24,9 @@ const scanContentStrict = async (filePath, mimetype) => {
     const isVideo = mimetype && mimetype.startsWith('video/');
     const isUrl = filePath.startsWith('http');
     const endpoint = 'https://api.sightengine.com/1.0/check.json';
-    const activeModels = 'gore,wad,genai'; 
+    
+    // 🔥 AGREGAMOS 'minors' PARA DETECTAR NIÑOS (Omitimos 'nudity' para permitir NSFW)
+    const activeModels = 'gore,wad,genai,minors'; 
 
     let targetUrl = filePath;
     if (isVideo && isUrl) targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg');
@@ -35,7 +37,7 @@ const scanContentStrict = async (filePath, mimetype) => {
         params: { models: activeModels, api_user: process.env.SIGHTENGINE_USER, api_secret: process.env.SIGHTENGINE_SECRET, url: targetUrl }
       });
     } else {
-      if (isVideo) return { isSafe: true, reason: null };
+      if (isVideo) return { isSafe: true, reason: null }; // ⚠️ Se brinca videos si no son URL
       const data = new FormData();
       data.append('models', activeModels); 
       data.append('api_user', process.env.SIGHTENGINE_USER);
@@ -46,9 +48,14 @@ const scanContentStrict = async (filePath, mimetype) => {
 
     const result = response.data;
     const threshold = 0.8;
+    
     if ((result.wad?.weapon || 0) > threshold) return { isSafe: false, reason: "Armas detectadas" };
     if ((result.gore?.prob || 0) > threshold) return { isSafe: false, reason: "Violencia detectada" };
     if ((result.type?.ai_generated || 0) > threshold) return { isSafe: false, reason: "IA / Deepfake detectado" };
+    
+    // 🔥 NUEVA REGLA: NIÑOS (CP)
+    const minorProb = result.minors?.prob || result.minor?.prob || 0;
+    if (minorProb > threshold) return { isSafe: false, reason: "Menores de edad detectados" };
 
     return { isSafe: true, reason: null };
   } catch (error) { return { isSafe: true, reason: null }; }
@@ -80,23 +87,28 @@ exports.createPost = async (req, res) => {
       mediaType = hasVideo ? 'VIDEO' : 'IMAGE';
 
       for (const file of files) {
-        // 1. Escanear con Sightengine
-        const scanResult = await scanContentStrict(file.path, file.mimetype);
-        if (!scanResult.isSafe) {
-          files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
-          return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
-        }
-
-        // 🔥 2. SUBIR A CLOUDINARY (El paso que faltaba)
+        // 🔥 1. SUBIR A CLOUDINARY PRIMERO (Para obtener la URL y generar la portada)
         const uploadResult = await cloudinary.uploader.upload(file.path, {
           folder: 'fansmio_uploads',
           resource_type: hasVideo ? 'video' : 'image'
         });
 
-        // 3. Guardar la URL real de la nube, no la ruta local
-        mediaUrls.push(uploadResult.secure_url);
+        const cloudUrl = uploadResult.secure_url;
 
-        // 4. Limpiar el archivo del disco duro del servidor para ahorrar espacio
+        // 🔥 2. ESCANEAR LA URL EN LA NUBE (Aquí se activa tu truco del .jpg)
+        const scanResult = await scanContentStrict(cloudUrl, file.mimetype);
+        
+        if (!scanResult.isSafe) {
+          // Si la IA detecta que es Deepfake o Ilegal, lo DESTRUIMOS de la nube inmediatamente
+          await cloudinary.uploader.destroy(uploadResult.public_id, { resource_type: hasVideo ? 'video' : 'image' });
+          files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+          return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
+        }
+
+        // 3. Si pasó el escáner, guardamos la URL segura
+        mediaUrls.push(cloudUrl);
+
+        // 4. Limpiar el archivo del disco duro local
         if(fs.existsSync(file.path)) fs.unlinkSync(file.path);
       }
     }
@@ -104,8 +116,8 @@ exports.createPost = async (req, res) => {
     if (!content && mediaUrls.length === 0) return res.status(400).json({ error: 'El post está vacío.' });
     if (content && containsForbiddenWords(content)) return res.status(403).json({ error: 'Contenido prohibido.' });
 
-    // 🔥 FIX: Guardar el texto directo (mediaUrls[0]) si es 1, o convertir a JSON si son varias
-    const finalMediaUrl = mediaUrls.length > 1 ? JSON.stringify(mediaUrls) : (mediaUrls.length === 1 ? mediaUrls[0] : null);
+    // Guardar el texto directo (mediaUrls) si es 1, o convertir a JSON si son varias
+    const finalMediaUrl = mediaUrls.length > 1 ? JSON.stringify(mediaUrls) : (mediaUrls.length === 1 ? mediaUrls : null);
 
     const newPost = await prisma.post.create({
       data: { 
@@ -121,7 +133,7 @@ exports.createPost = async (req, res) => {
     
     res.status(201).json({ message: 'Publicado exitosamente ⚡', post: newPost });
   } catch (error) { 
-    console.error("🔥 ERROR CRÍTICO AL PUBLICAR:", error); // <-- Para ver qué pasa en Coolify
+    console.error("🔥 ERROR CRÍTICO AL PUBLICAR:", error); 
     res.status(500).json({ error: 'Fallo al publicar.' }); 
   }
 };
