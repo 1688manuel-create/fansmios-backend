@@ -53,7 +53,7 @@ exports.handlePayRamWebhook = async (req, res) => {
         prisma.wallet.upsert({
           where: { userId: userId },
           update: { balance: { increment: usdToAdd } }, // 🔥 Sumamos DÓLARES directos
-          create: { userId: userId, balance: usdToAdd, pendingBalance: 0, coinBalance: 0 }
+          create: { userId: userId, balance: usdToAdd, pendingBalance: 0 } // ✅ INTRUSO ELIMINADO
         }),
         prisma.transaction.create({
           data: {
