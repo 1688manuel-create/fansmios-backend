@@ -17,18 +17,20 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado...");
 }
 
-// 🔥 RADAR ESTRICTO (IA Moderation) - VERSIÓN RECUPERADA 🛡️
+// 🔥 RADAR ESTRICTO (IA Moderation) - CALIBRADO 🛡️
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) return { isSafe: true, reason: null };
   try {
     const isVideo = mimetype && mimetype.startsWith('video/');
     const isUrl = filePath.startsWith('http');
     const endpoint = 'https://api.sightengine.com/1.0/check.json';
-    const activeModels = 'gore,wad,genai,minors'; 
+    
+    // ⚠️ REGRESAMOS A LOS MODELOS QUE SÍ TIENES ACTIVOS EN TU PLAN PARA EVITAR CRASHEOS
+    const activeModels = 'gore,wad,genai'; 
 
     let targetUrl = filePath;
     if (isVideo && isUrl) {
-      // 🔥 TRUCO MEJORADO: Pedimos la portada en CALIDAD MÁXIMA (q_100) para no borrar las huellas de la IA
+      // Pedimos la portada en CALIDAD MÁXIMA (q_100)
       targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg').replace('/upload/', '/upload/q_100/');
     }
 
@@ -38,9 +40,8 @@ const scanContentStrict = async (filePath, mimetype) => {
         params: { models: activeModels, api_user: process.env.SIGHTENGINE_USER, api_secret: process.env.SIGHTENGINE_SECRET, url: targetUrl }
       });
     } else {
-      if (isVideo) return { isSafe: true, reason: null }; // Se brinca videos locales
+      if (isVideo) return { isSafe: true, reason: null }; 
       
-      // 🔥 ESCANEO LOCAL CRUDO: Máxima precisión contra imágenes de IA
       const data = new FormData();
       data.append('models', activeModels); 
       data.append('api_user', process.env.SIGHTENGINE_USER);
@@ -50,17 +51,20 @@ const scanContentStrict = async (filePath, mimetype) => {
     }
 
     const result = response.data;
-    const threshold = 0.8;
+    
+    // 🔥 UMBRAL MÁS ESTRICTO: Lo bajamos de 0.8 (80%) a 0.6 (60%) para que detecte IAs más sutiles
+    const threshold = 0.6;
     
     if ((result.wad?.weapon || 0) > threshold) return { isSafe: false, reason: "Armas detectadas" };
     if ((result.gore?.prob || 0) > threshold) return { isSafe: false, reason: "Violencia detectada" };
     if ((result.type?.ai_generated || 0) > threshold) return { isSafe: false, reason: "IA / Deepfake detectado" };
-    
-    const minorProb = result.minors?.prob || result.minor?.prob || 0;
-    if (minorProb > threshold) return { isSafe: false, reason: "Menores de edad detectados" };
 
     return { isSafe: true, reason: null };
-  } catch (error) { return { isSafe: true, reason: null }; }
+  } catch (error) { 
+    // 🚨 AHORA SÍ VERÁS EL ERROR EN LA CONSOLA SI SIGHTENGINE FALLA
+    console.error("🚨 SIGHTENGINE ERROR:", error.response ? error.response.data : error.message);
+    return { isSafe: true, reason: null }; 
+  }
 };
 
 // ==========================================
