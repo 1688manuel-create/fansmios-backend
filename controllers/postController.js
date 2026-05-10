@@ -17,21 +17,20 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado...");
 }
 
-// 🔥 RADAR ESTRICTO (IA Moderation) - CALIBRADO 🛡️
+// 🔥 RADAR ESTRICTO (IA Moderation) - CALIBRADO PARA VIDEOS 🎬
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) return { isSafe: true, reason: null };
   try {
     const isVideo = mimetype && mimetype.startsWith('video/');
     const isUrl = filePath.startsWith('http');
     const endpoint = 'https://api.sightengine.com/1.0/check.json';
-    
-    // ⚠️ REGRESAMOS A LOS MODELOS QUE SÍ TIENES ACTIVOS EN TU PLAN PARA EVITAR CRASHEOS
     const activeModels = 'gore,wad,genai'; 
 
     let targetUrl = filePath;
     if (isVideo && isUrl) {
-      // Pedimos la portada en CALIDAD MÁXIMA (q_100)
-      targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg').replace('/upload/', '/upload/q_100/');
+      // 🔥 TRUCO FRANCOTIRADOR: Extraemos un fotograma de la MITAD del video (so_50p) en calidad 100.
+      targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg').replace('/upload/', '/upload/so_50p,q_100/');
+      console.log(`📸 [Radar] Analizando fotograma del video: ${targetUrl}`);
     }
 
     let response;
@@ -51,9 +50,10 @@ const scanContentStrict = async (filePath, mimetype) => {
     }
 
     const result = response.data;
-    
-    // 🔥 UMBRAL MÁS ESTRICTO: Lo bajamos de 0.8 (80%) a 0.6 (60%) para que detecte IAs más sutiles
     const threshold = 0.6;
+    
+    // 📊 MEDIDOR TÁCTICO: Imprime en consola la probabilidad exacta que detecta Sightengine
+    console.log(`🤖 [Radar] Nivel de IA detectado: ${result.type?.ai_generated || 0}`);
     
     if ((result.wad?.weapon || 0) > threshold) return { isSafe: false, reason: "Armas detectadas" };
     if ((result.gore?.prob || 0) > threshold) return { isSafe: false, reason: "Violencia detectada" };
@@ -61,7 +61,6 @@ const scanContentStrict = async (filePath, mimetype) => {
 
     return { isSafe: true, reason: null };
   } catch (error) { 
-    // 🚨 AHORA SÍ VERÁS EL ERROR EN LA CONSOLA SI SIGHTENGINE FALLA
     console.error("🚨 SIGHTENGINE ERROR:", error.response ? error.response.data : error.message);
     return { isSafe: true, reason: null }; 
   }
