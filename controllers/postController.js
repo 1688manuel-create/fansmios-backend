@@ -17,7 +17,7 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado...");
 }
 
-// 🔥 RADAR ESTRICTO (IA Moderation) - CALIBRADO PARA VIDEOS 🎬
+// 🔥 RADAR ESTRICTO (IA Moderation) - CALIBRADO ULTRA-SENSIBLE 🎬
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) return { isSafe: true, reason: null };
   try {
@@ -28,7 +28,7 @@ const scanContentStrict = async (filePath, mimetype) => {
 
     let targetUrl = filePath;
     if (isVideo && isUrl) {
-      // 🔥 TRUCO FRANCOTIRADOR: Extraemos un fotograma de la MITAD del video (so_50p) en calidad 100.
+      // Truco Francotirador: Mitad del video, calidad máxima
       targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg').replace('/upload/', '/upload/so_50p,q_100/');
       console.log(`📸 [Radar] Analizando fotograma del video: ${targetUrl}`);
     }
@@ -50,14 +50,19 @@ const scanContentStrict = async (filePath, mimetype) => {
     }
 
     const result = response.data;
-    const threshold = 0.6;
     
-    // 📊 MEDIDOR TÁCTICO: Imprime en consola la probabilidad exacta que detecta Sightengine
-    console.log(`🤖 [Radar] Nivel de IA detectado: ${result.type?.ai_generated || 0}`);
+    // 🔥 SENSORES DIVIDIDOS:
+    const standardThreshold = 0.6; // 60% para Armas y Gore
+    const aiThreshold = 0.3;       // 30% ULTRA-SENSIBLE para IA / Deepfakes
     
-    if ((result.wad?.weapon || 0) > threshold) return { isSafe: false, reason: "Armas detectadas" };
-    if ((result.gore?.prob || 0) > threshold) return { isSafe: false, reason: "Violencia detectada" };
-    if ((result.type?.ai_generated || 0) > threshold) return { isSafe: false, reason: "IA / Deepfake detectado" };
+    const aiScore = result.type?.ai_generated || 0;
+    console.log(`🤖 [Radar] Nivel de IA detectado: ${aiScore}`);
+    
+    if ((result.wad?.weapon || 0) > standardThreshold) return { isSafe: false, reason: "Armas detectadas" };
+    if ((result.gore?.prob || 0) > standardThreshold) return { isSafe: false, reason: "Violencia detectada" };
+    
+    // APLICAMOS LA GUILLOTINA ULTRA-SENSIBLE:
+    if (aiScore > aiThreshold) return { isSafe: false, reason: "IA / Deepfake detectado" };
 
     return { isSafe: true, reason: null };
   } catch (error) { 
