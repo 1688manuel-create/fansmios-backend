@@ -17,19 +17,20 @@ try {
   console.log("⚠️ Archivo de filtro de palabras no encontrado...");
 }
 
-// 🔥 RADAR ESTRICTO (IA Moderation)
+// 🔥 RADAR ESTRICTO (IA Moderation) - VERSIÓN RECUPERADA 🛡️
 const scanContentStrict = async (filePath, mimetype) => {
   if (!process.env.SIGHTENGINE_USER || !process.env.SIGHTENGINE_SECRET) return { isSafe: true, reason: null };
   try {
     const isVideo = mimetype && mimetype.startsWith('video/');
     const isUrl = filePath.startsWith('http');
     const endpoint = 'https://api.sightengine.com/1.0/check.json';
-    
-    // 🔥 AGREGAMOS 'minors' PARA DETECTAR NIÑOS (Omitimos 'nudity' para permitir NSFW)
     const activeModels = 'gore,wad,genai,minors'; 
 
     let targetUrl = filePath;
-    if (isVideo && isUrl) targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg');
+    if (isVideo && isUrl) {
+      // 🔥 TRUCO MEJORADO: Pedimos la portada en CALIDAD MÁXIMA (q_100) para no borrar las huellas de la IA
+      targetUrl = filePath.replace(/\.(mp4|mov|webm)$/i, '.jpg').replace('/upload/', '/upload/q_100/');
+    }
 
     let response;
     if (isUrl) {
@@ -37,7 +38,9 @@ const scanContentStrict = async (filePath, mimetype) => {
         params: { models: activeModels, api_user: process.env.SIGHTENGINE_USER, api_secret: process.env.SIGHTENGINE_SECRET, url: targetUrl }
       });
     } else {
-      if (isVideo) return { isSafe: true, reason: null }; // ⚠️ Se brinca videos si no son URL
+      if (isVideo) return { isSafe: true, reason: null }; // Se brinca videos locales
+      
+      // 🔥 ESCANEO LOCAL CRUDO: Máxima precisión contra imágenes de IA
       const data = new FormData();
       data.append('models', activeModels); 
       data.append('api_user', process.env.SIGHTENGINE_USER);
@@ -53,7 +56,6 @@ const scanContentStrict = async (filePath, mimetype) => {
     if ((result.gore?.prob || 0) > threshold) return { isSafe: false, reason: "Violencia detectada" };
     if ((result.type?.ai_generated || 0) > threshold) return { isSafe: false, reason: "IA / Deepfake detectado" };
     
-    // 🔥 NUEVA REGLA: NIÑOS (CP)
     const minorProb = result.minors?.prob || result.minor?.prob || 0;
     if (minorProb > threshold) return { isSafe: false, reason: "Menores de edad detectados" };
 
@@ -87,28 +89,34 @@ exports.createPost = async (req, res) => {
       mediaType = hasVideo ? 'VIDEO' : 'IMAGE';
 
       for (const file of files) {
-        // 🔥 1. SUBIR A CLOUDINARY PRIMERO (Para obtener la URL y generar la portada)
-        const uploadResult = await cloudinary.uploader.upload(file.path, {
-          folder: 'fansmio_uploads',
-          resource_type: hasVideo ? 'video' : 'image'
-        });
+        const isVideo = file.mimetype.startsWith('video/');
+        let cloudUrl = '';
 
-        const cloudUrl = uploadResult.secure_url;
+        if (!isVideo) {
+          // 🛑 1. IMÁGENES: Escaneamos el archivo LOCAL crudo (100% Precisión contra IAs)
+          const scanResult = await scanContentStrict(file.path, file.mimetype); // <-- Limpiado
+          if (!scanResult.isSafe) {
+            files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+            return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
+          }
+          // Subimos después de aprobar
+          const uploadResult = await cloudinary.uploader.upload(file.path, { folder: 'fansmio_uploads', resource_type: 'image' });
+          cloudUrl = uploadResult.secure_url;
+        } else {
+          // 🎬 2. VIDEOS: Subimos primero para obtener URL
+          const uploadResult = await cloudinary.uploader.upload(file.path, { folder: 'fansmio_uploads', resource_type: 'video' });
+          cloudUrl = uploadResult.secure_url;
 
-        // 🔥 2. ESCANEAR LA URL EN LA NUBE (Aquí se activa tu truco del .jpg)
-        const scanResult = await scanContentStrict(cloudUrl, file.mimetype);
-        
-        if (!scanResult.isSafe) {
-          // Si la IA detecta que es Deepfake o Ilegal, lo DESTRUIMOS de la nube inmediatamente
-          await cloudinary.uploader.destroy(uploadResult.public_id, { resource_type: hasVideo ? 'video' : 'image' });
-          files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
-          return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
+          // Escaneamos la URL usando el Truco del .JPG en Alta Calidad
+          const scanResult = await scanContentStrict(cloudUrl, file.mimetype); // <-- Limpiado
+          if (!scanResult.isSafe) {
+            await cloudinary.uploader.destroy(uploadResult.public_id, { resource_type: 'video' });
+            files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+            return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
+          }
         }
 
-        // 3. Si pasó el escáner, guardamos la URL segura
         mediaUrls.push(cloudUrl);
-
-        // 4. Limpiar el archivo del disco duro local
         if(fs.existsSync(file.path)) fs.unlinkSync(file.path);
       }
     }
@@ -116,23 +124,16 @@ exports.createPost = async (req, res) => {
     if (!content && mediaUrls.length === 0) return res.status(400).json({ error: 'El post está vacío.' });
     if (content && containsForbiddenWords(content)) return res.status(403).json({ error: 'Contenido prohibido.' });
 
-    // 🔥 FIX BLINDADO: Garantizar que la base de datos reciba Texto (String) y NO un Array
+    // 🔥 FIX BLINDADO: Garantizar Texto (String)
     let finalMediaUrl = null;
     if (mediaUrls.length === 1) {
-      finalMediaUrl = mediaUrls[0]; // <--- AQUÍ ESTÁ LA CORRECCIÓN EXACTA APLICADA
+      finalMediaUrl = mediaUrls[0]; 
     } else if (mediaUrls.length > 1) {
-      finalMediaUrl = JSON.stringify(mediaUrls); // Si son varios, lo empaquetamos como texto JSON
+      finalMediaUrl = JSON.stringify(mediaUrls); 
     }
 
     const newPost = await prisma.post.create({
-      data: { 
-        content: content || null, 
-        mediaUrl: finalMediaUrl, // <--- CLAVE: Pasamos el texto limpio, no el array original
-        mediaType, 
-        isPPV: isPPV === 'true' || isPPV === true, 
-        price: price ? parseFloat(price) : 0, 
-        userId 
-      },
+      data: { content: content || null, mediaUrl: finalMediaUrl, mediaType, isPPV: isPPV === 'true' || isPPV === true, price: price ? parseFloat(price) : 0, userId },
       include: { user: { select: { username: true } } }
     });
     
