@@ -164,6 +164,7 @@ exports.getAllPosts = async (req, res) => {
     const posts = await prisma.post.findMany({
       where: { OR: [{ user: { status: 'ACTIVE' } }, { userId: userId }] },
       orderBy: { createdAt: 'desc' },
+      take: 15, // 🔥 AGREGA ESTO: Solo trae los últimos 15 posts para que cargue a la velocidad de la luz
       include: {
         user: { 
           select: { 
