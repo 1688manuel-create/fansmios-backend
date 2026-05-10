@@ -116,13 +116,18 @@ exports.createPost = async (req, res) => {
     if (!content && mediaUrls.length === 0) return res.status(400).json({ error: 'El post está vacío.' });
     if (content && containsForbiddenWords(content)) return res.status(403).json({ error: 'Contenido prohibido.' });
 
-    // Guardar el texto directo (mediaUrls) si es 1, o convertir a JSON si son varias
-    const finalMediaUrl = mediaUrls.length > 1 ? JSON.stringify(mediaUrls) : (mediaUrls.length === 1 ? mediaUrls : null);
+    // 🔥 FIX BLINDADO: Garantizar que la base de datos reciba Texto (String) y NO un Array
+    let finalMediaUrl = null;
+    if (mediaUrls.length === 1) {
+      finalMediaUrl = mediaUrls[0]; // <--- AQUÍ ESTÁ LA CORRECCIÓN EXACTA APLICADA
+    } else if (mediaUrls.length > 1) {
+      finalMediaUrl = JSON.stringify(mediaUrls); // Si son varios, lo empaquetamos como texto JSON
+    }
 
     const newPost = await prisma.post.create({
       data: { 
         content: content || null, 
-        mediaUrl: finalMediaUrl, 
+        mediaUrl: finalMediaUrl, // <--- CLAVE: Pasamos el texto limpio, no el array original
         mediaType, 
         isPPV: isPPV === 'true' || isPPV === true, 
         price: price ? parseFloat(price) : 0, 
