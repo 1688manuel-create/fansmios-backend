@@ -60,6 +60,9 @@ exports.getTransactionHistory = async (req, res) => {
   }
 };
 
+// ==========================================
+// 🚀 SOLICITUD DE RETIRO (100% AUTOMÁTICO VÍA PAYRAM)
+// ==========================================
 exports.requestWithdrawal = async (req, res) => {
   try {
     const creatorId = req.user.userId;
@@ -85,16 +88,15 @@ exports.requestWithdrawal = async (req, res) => {
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
       const recentWithdrawal = await prisma.withdrawal.findFirst({
-        where: { creatorId: creatorId, createdAt: { gte: sevenDaysAgo } }
+        where: { creatorId: creatorId, createdAt: { gte: sevenDaysAgo }, status: { not: 'FAILED' } }
       });
       if (recentWithdrawal) return res.status(400).json({ error: 'Ya pediste un retiro esta semana. Si te urge, usa "Retiro Exprés ⚡".' });
     }
 
     const wallet = await prisma.wallet.findUnique({ where: { userId: creatorId } });
     if (!wallet || wallet.balance < withdrawalAmount) return res.status(400).json({ error: 'No tienes saldo disponible suficiente.' });
-    if (!wallet.cryptoAddress || wallet.cryptoAddress.length < 10) return res.status(400).json({ error: 'Configura tu Billetera USDT (TRC20) antes de solicitar un retiro.' });
+    if (!wallet.cryptoAddress || wallet.cryptoAddress.length < 10) return res.status(400).json({ error: 'Configura tu Billetera Cripto antes de solicitar un retiro.' });
 
-    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL (🔥 CORREGIDO SINGULAR)
     const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feeWithdrawalExp: 5, feeWithdrawalStd: 2 };
     const feePercent = isExpress ? (settings.feeWithdrawalExp / 100) : (settings.feeWithdrawalStd / 100);
     
@@ -102,6 +104,7 @@ exports.requestWithdrawal = async (req, res) => {
     const netAmount = withdrawalAmount - feeAmount;
     const typeLabel = isExpress ? '⚡ RETIRO EXPRÉS' : '🐢 RETIRO ESTÁNDAR';
 
+    // 🛡️ PASO 1: BLOQUEO DE FONDOS (Quitar saldo y poner en pendiente temporalmente)
     const withdrawal = await prisma.$transaction(async (tx) => {
       await tx.wallet.update({
         where: { userId: creatorId },
@@ -117,14 +120,83 @@ exports.requestWithdrawal = async (req, res) => {
 
       return await tx.withdrawal.create({
         data: { 
-          creatorId: creatorId, amount: withdrawalAmount, status: 'PENDING', cryptoAddress: wallet.cryptoAddress, cryptoNetwork: wallet.cryptoNetwork || 'TRC20',
-          adminNotes: `[${typeLabel}] Bruto: $${withdrawalAmount} | Fee (${feePercent * 100}%): $${feeAmount.toFixed(2)} | NETO: $${netAmount.toFixed(2)}`
+          creatorId: creatorId, amount: withdrawalAmount, status: 'PROCESSING', cryptoAddress: wallet.cryptoAddress, cryptoNetwork: 'BASE',
+          adminNotes: `[${typeLabel}] Bruto: $${withdrawalAmount} | Fee: $${feeAmount.toFixed(2)} | NETO: $${netAmount.toFixed(2)}`
         }
       });
     });
 
-    res.status(201).json({ message: `Retiro ${isExpress ? 'Exprés ⚡' : 'Estándar ⏳'} autorizado. Recibirás $${netAmount.toFixed(2)} USDT.`, withdrawal });
+    // 🚀 PASO 2: DISPARO AUTOMÁTICO A PAYRAM
+    try {
+      console.log(`📡 [PAYRAM] Disparando retiro automático para @${user.username} - Monto Neto: $${netAmount}`);
+      
+      // 🔥 RUTA OFICIAL PAYRAM
+      const payramPayoutUrl = `${process.env.PAYRAM_BASE_URL}/api/v1/withdrawal/merchant`; 
+
+      const payramResponse = await axios.post(payramPayoutUrl, {
+        email: user.email,
+        blockChainCode: 'BASE',
+        currencyCode: 'USDC',
+        amount: netAmount.toString(),
+        toAddress: wallet.cryptoAddress,
+        customerID: creatorId.toString()
+      }, {
+        headers: { 
+          'API-Key': process.env.PAYRAM_API_KEY, 
+          'Content-Type': 'application/json' 
+        }
+      });
+
+      // ✅ PASO 3A: ÉXITO - Confirmar la salida en la Base de Datos
+      const payramWithdrawalId = payramResponse.data.id; 
+      const payramStatus = payramResponse.data.status; 
+      
+      console.log(`✅ [PAYRAM] Orden de pago aceptada. ID PayRam: ${payramWithdrawalId} | Estado: ${payramStatus}`);
+
+      await prisma.$transaction([
+        // Marcamos como COMPLETED en FansMio porque PayRam ya se está encargando del envío
+        prisma.withdrawal.update({ 
+          where: { id: withdrawal.id }, 
+          data: { status: 'COMPLETED', txHash: `PAYRAM-ID-${payramWithdrawalId}` } 
+        }),
+        // Borramos el pending balance porque el dinero ya abandonó la bóveda de FansMio
+        prisma.wallet.update({ 
+          where: { userId: creatorId }, 
+          data: { pendingBalance: { decrement: withdrawalAmount } } 
+        }),
+        prisma.transaction.updateMany({ 
+          where: { senderId: creatorId, type: 'PAYOUT', status: 'PENDING' }, 
+          data: { status: 'COMPLETED' } 
+        })
+      ]);
+
+      return res.status(201).json({ message: `¡Retiro Procesado! 🚀 $${netAmount.toFixed(2)} USDC van en camino a tu billetera.`, withdrawal });
+
+    } catch (payramError) {
+      // 🚨 PASO 3B: FALLO EN PAYRAM - Reembolso automático de seguridad
+      console.error("❌ Error en PayRam Automático:", payramError.response ? payramError.response.data : payramError.message);
+      
+      await prisma.$transaction([
+        // Devolvemos el saldo original al creador para que no pierda su dinero
+        prisma.wallet.update({ 
+          where: { userId: creatorId }, 
+          data: { balance: { increment: withdrawalAmount }, pendingBalance: { decrement: withdrawalAmount } } 
+        }),
+        prisma.withdrawal.update({ 
+          where: { id: withdrawal.id }, 
+          data: { status: 'FAILED', adminNotes: `Fallo PayRam: ${payramError.response ? JSON.stringify(payramError.response.data) : payramError.message}` } 
+        }),
+        prisma.transaction.updateMany({ 
+          where: { senderId: creatorId, type: 'PAYOUT', status: 'PENDING' }, 
+          data: { status: 'FAILED' } 
+        })
+      ]);
+
+      return res.status(500).json({ error: 'La red cripto está congestionada o hubo un error en PayRam. Tu saldo fue devuelto a tu bóveda.' });
+    }
+
   } catch (error) {
+    console.error("Error crítico en solicitud de retiro:", error);
     res.status(500).json({ error: 'Error interno procesando la solicitud.' });
   }
 };
