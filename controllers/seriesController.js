@@ -251,7 +251,8 @@ exports.buySeries = async (req, res) => {
       }
 
       // 👑 MODO DIOS: Leer la comisión de la base de datos (Usamos el fee de PPV para los cursos)
-      const settings = await tx.platformSettings.findFirst() || { feePPV: 15 };
+      // 🔥 CORREGIDO: Usando 'platformSetting' en singular y 'findUnique'
+      const settings = await tx.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feePPV: 20 };
       const feePercent = settings.feePPV / 100;
 
       // 4. CÁLCULOS FINANCIEROS DINÁMICOS
