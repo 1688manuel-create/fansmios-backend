@@ -248,6 +248,7 @@ exports.getDashboard = async (req, res) => {
       totalEarnedHistorial, withdrawalHistory, recentTransactions: mappedTransactions
     });
   } catch (error) {
+    console.error("🚨 ALERTA ROJA EN DASHBOARD:", error); // Esto te dirá exactamente qué pasa en tu consola de Coolify
     res.status(500).json({ error: "Error al obtener datos de la billetera." });
   }
 };
