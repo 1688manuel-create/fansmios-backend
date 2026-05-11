@@ -37,7 +37,7 @@ exports.createPaymentIntent = async (req, res) => {
       }
     }
 
-    if (finalAmount < 0.50) finalAmount = 0.50;
+    if (finalAmount <= 0) return res.status(400).json({ error: 'El monto de la transacción debe ser mayor a 0.' });
 
     // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL (🔥 CORREGIDO SINGULAR)
     const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20, feeReferral: 5 };
