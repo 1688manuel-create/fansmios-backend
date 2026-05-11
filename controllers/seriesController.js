@@ -279,21 +279,19 @@ exports.buySeries = async (req, res) => {
         data: { seriesId, fanId, pricePaid: price }
       });
 
+      // 🔥 REGISTRO ÚNICO Y LIMPIO DE LA TRANSACCIÓN
       await tx.transaction.create({
-        data: { senderId: fanId, receiverId: series.creatorId, amount: -price, type: 'BUNDLE', status: 'COMPLETED', attachedMessage: `Compra: ${series.title}`, platformFee: 0, netAmount: -price }
-      });
-
-      // 🔥 AQUÍ SE REGISTRA LA COMISIÓN EXACTA DEL MODO DIOS PARA FANSMIO
-      await tx.transaction.create({
-        data: { senderId: fanId, receiverId: series.creatorId, amount: price, type: 'BUNDLE', status: 'COMPLETED', attachedMessage: `Venta: ${series.title}`, platformFee: platformFee, netAmount: creatorEarnings }
-      });
-
-      await tx.transaction.create({
-        data: { senderId: fanId, receiverId: series.creatorId, amount: price, type: 'BUNDLE', status: 'PENDING', attachedMessage: `Venta de academia VIP: ${series.title}`, platformFee: platformFee, netAmount: creatorEarnings }
-      });
-
-      await tx.notification.create({
-        data: { userId: series.creatorId, type: 'SALE', content: `¡Felicidades! Alguien compró tu curso "${series.title}". Ganaste $${creatorEarnings} USD.` }
+        data: { 
+          senderId: fanId, 
+          receiverId: series.creatorId, 
+          amount: price, 
+          type: 'BUNDLE', 
+          status: 'COMPLETED', 
+          attachedMessage: `Academia VIP: ${series.title}`, 
+          platformFee: platformFee, 
+          netAmount: creatorEarnings,
+          postId: seriesId
+        }
       });
 
       return purchase;
