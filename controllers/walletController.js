@@ -222,7 +222,7 @@ exports.getDashboard = async (req, res) => {
       where: { 
         receiverId: userId, 
         status: { in: ['COMPLETED', 'PENDING'] }, 
-        type: { in: ['TIP', 'SUBSCRIPTION', 'PPV_POST', 'PPV_MESSAGE', 'BUNDLE', 'LIVE_TICKET', 'CHALLENGE', 'AUCTION'] } 
+        type: { in: ['TIP', 'SUBSCRIPTION', 'PPV_POST', 'PPV_MESSAGE', 'BUNDLE', 'LIVE_TICKET', 'PROMOTION', 'CHALLENGE', 'AUCTION'] }
       },
       _sum: { netAmount: true }
     });

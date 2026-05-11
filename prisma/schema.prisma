@@ -40,6 +40,8 @@ enum TransactionType {
   PAYOUT 
   PROMOTION
   CREDIT_TOPUP 
+  CHALLENGE
+  AUCTION
 }
 
 enum TransactionStatus {
