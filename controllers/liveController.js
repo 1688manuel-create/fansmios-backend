@@ -426,3 +426,90 @@ exports.deleteChallenge = async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar el reto.' });
   }
 };
+
+// ==========================================
+// 🎯 FASE 2: PAGAR UN RETO EN VIVO (AUTOMÁTICO)
+// ==========================================
+exports.payForChallenge = async (req, res) => {
+  try {
+    const fanId = req.user.userId;
+    const { streamId, challengeId } = req.body;
+
+    // Buscar la transmisión y el reto
+    const stream = await prisma.liveStream.findUnique({ where: { id: streamId } });
+    const challenge = await prisma.liveChallenge.findUnique({ where: { id: challengeId } });
+
+    if (!stream || !challenge) {
+      return res.status(404).json({ error: 'Transmisión o Reto no encontrado.' });
+    }
+
+    if (!challenge.isActive) {
+      return res.status(400).json({ error: 'Este reto no está activo en este momento.' });
+    }
+
+    const amount = challenge.price;
+    const fanWallet = await prisma.wallet.findUnique({ where: { userId: fanId } });
+
+    if (!fanWallet || fanWallet.balance < amount) {
+      return res.status(400).json({ error: 'Saldo insuficiente en tu Bóveda. Recarga para cumplir el reto.' });
+    }
+
+    // 🔥 COMISIONES DINÁMICAS (Usamos la comisión de Tips/Regalos por defecto)
+    const globalSettings = await prisma.platformSetting.findFirst() || { feeTips: 20 };
+    let feePercent = globalSettings.feeTips / 100;
+    
+    // Si el creador tiene un fee personalizado, lo usamos
+    const creatorProfile = await prisma.creatorProfile.findUnique({ where: { userId: stream.creatorId } });
+    if (creatorProfile?.customFeeTips != null) {
+      feePercent = creatorProfile.customFeeTips / 100;
+    }
+
+    const feeAmount = amount * feePercent;
+    const netAmount = amount - feeAmount;
+
+    // ⚡ TRANSACCIÓN ATÓMICA BLINDADA
+    await prisma.$transaction([
+      // 1. Descontar al Fan
+      prisma.wallet.update({ 
+        where: { userId: fanId }, 
+        data: { balance: { decrement: amount } } 
+      }),
+      // 2. Acreditar al Creador
+      prisma.wallet.upsert({
+        where: { userId: stream.creatorId },
+        update: { balance: { increment: netAmount } },
+        create: { userId: stream.creatorId, balance: netAmount }
+      }),
+      // 3. Registrar el ticket en el historial (IMPORTANTE PARA EL DASHBOARD)
+      prisma.transaction.create({
+        data: {
+          senderId: fanId, 
+          receiverId: stream.creatorId,
+          amount: amount, 
+          platformFee: feeAmount, 
+          netAmount: netAmount,
+          type: 'CHALLENGE', // 👈 ¡Esto lo hará aparecer en el historial!
+          status: 'COMPLETED', 
+          postId: streamId,
+          attachedMessage: `Reto pagado: ${challenge.title}`
+        }
+      }),
+      // 4. Mandar un mensaje automático al chat en vivo para hacer ruido 🎉
+      prisma.liveChatMessage.create({
+        data: {
+          streamId: streamId, 
+          userId: fanId,
+          content: `🔥 ¡Acabo de pagar para que cumplas el reto: ${challenge.title}!`,
+          isDonation: true, 
+          amount: amount
+        }
+      })
+    ]);
+
+    res.status(200).json({ success: true, message: '¡Reto pagado con éxito! El creador ha sido notificado.' });
+
+  } catch (error) {
+    console.error('❌ Error al pagar reto:', error);
+    res.status(500).json({ error: 'Error al procesar el pago del reto.' });
+  }
+};

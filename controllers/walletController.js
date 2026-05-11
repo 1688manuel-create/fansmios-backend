@@ -217,8 +217,13 @@ exports.getDashboard = async (req, res) => {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const wallet = await prisma.wallet.findUnique({ where: { userId: userId } });
 
+    // 🔥 CIRUGÍA AQUÍ: Se añadieron 'CHALLENGE' y 'AUCTION' al final del array de "type"
     const totalEarnedAggr = await prisma.transaction.aggregate({
-      where: { receiverId: userId, status: { in: ['COMPLETED', 'PENDING'] }, type: { in: ['TIP', 'SUBSCRIPTION', 'PPV_POST', 'PPV_MESSAGE', 'BUNDLE', 'LIVE_TICKET'] } },
+      where: { 
+        receiverId: userId, 
+        status: { in: ['COMPLETED', 'PENDING'] }, 
+        type: { in: ['TIP', 'SUBSCRIPTION', 'PPV_POST', 'PPV_MESSAGE', 'BUNDLE', 'LIVE_TICKET', 'CHALLENGE', 'AUCTION'] } 
+      },
       _sum: { netAmount: true }
     });
     const totalEarnedHistorial = totalEarnedAggr._sum.netAmount || 0;
