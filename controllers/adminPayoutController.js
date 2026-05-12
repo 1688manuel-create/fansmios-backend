@@ -95,7 +95,7 @@ exports.approveWithdrawal = async (req, res) => {
       where: { id: withdrawalId }, include: { creator: true } 
     });
 
-    if (!withdrawal || withdrawal.status !== 'PENDING') {
+    if (!withdrawal || (withdrawal.status !== 'PENDING' && withdrawal.status !== 'PROCESSING')) {
       return res.status(400).json({ error: 'El retiro no existe o ya fue procesado.' });
     }
 
@@ -214,7 +214,7 @@ exports.rejectWithdrawal = async (req, res) => {
 
     const withdrawal = await prisma.withdrawal.findUnique({ where: { id: withdrawalId } });
 
-    if (!withdrawal || withdrawal.status !== 'PENDING') {
+    if (!withdrawal || (withdrawal.status !== 'PENDING' && withdrawal.status !== 'PROCESSING')) {
       return res.status(400).json({ error: 'El retiro no existe o ya fue procesado.' });
     }
 
