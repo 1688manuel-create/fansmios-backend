@@ -32,6 +32,9 @@ exports.getWalletBalance = async (req, res) => {
       });
     }
 
+    // 💥 CHEAT CODE TEMPORAL (Bórralo después de la prueba)
+    wallet.balance = 50.00;
+
     res.status(200).json({
       message: 'Billetera obtenida exitosamente 💰',
       wallet: {
