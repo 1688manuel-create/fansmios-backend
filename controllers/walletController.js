@@ -162,7 +162,7 @@ exports.requestWithdrawal = async (req, res) => {
         // Marcamos como COMPLETED en FansMio porque PayRam ya se está encargando del envío
         prisma.withdrawal.update({ 
           where: { id: withdrawal.id }, 
-          data: { status: 'COMPLETED', txHash: `PAYRAM-ID-${payramWithdrawalId}` } 
+          data: { status: 'PAID', txHash: `PAYRAM-ID-${payramWithdrawalId}` } 
         }),
         // Borramos el pending balance porque el dinero ya abandonó la bóveda de FansMio
         prisma.wallet.update({ 
@@ -189,7 +189,7 @@ exports.requestWithdrawal = async (req, res) => {
         }),
         prisma.withdrawal.update({ 
           where: { id: withdrawal.id }, 
-          data: { status: 'FAILED', adminNotes: `Fallo PayRam: ${payramError.response ? JSON.stringify(payramError.response.data) : payramError.message}` } 
+          data: { status: 'REJECTED', adminNotes: `Fallo PayRam: ${payramError.response ? JSON.stringify(payramError.response.data) : payramError.message}` } 
         }),
         prisma.transaction.updateMany({ 
           where: { senderId: creatorId, type: 'PAYOUT', status: 'PENDING' }, 
