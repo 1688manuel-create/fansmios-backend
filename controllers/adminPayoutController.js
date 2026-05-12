@@ -61,12 +61,12 @@ const createPdfBuffer = (withdrawal) => {
 };
 
 // ==========================================
-// 1. OBTENER RETIROS PENDIENTES
+// 1. OBTENER TODOS LOS RETIROS (HISTORIAL COMPLETO)
 // ==========================================
 exports.getPendingWithdrawals = async (req, res) => {
   try {
     const withdrawals = await prisma.withdrawal.findMany({
-      where: { status: { in: ['PENDING', 'PROCESSING'] } },
+      // 🔥 ELIMINAMOS LA LÍNEA 'where' PARA ROMPER EL FILTRO Y VER TODO (PAID, REJECTED, PENDING)
       include: {
         creator: { 
           select: { 
@@ -75,7 +75,7 @@ exports.getPendingWithdrawals = async (req, res) => {
           } 
         }
       },
-      orderBy: { createdAt: 'asc' } 
+      orderBy: { createdAt: 'desc' } // 🔥 CAMBIAMOS 'asc' POR 'desc' PARA VER LOS MÁS NUEVOS ARRIBA
     });
     res.status(200).json({ withdrawals });
   } catch (error) {
