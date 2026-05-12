@@ -32,9 +32,6 @@ exports.getWalletBalance = async (req, res) => {
       });
     }
 
-    // 💥 CHEAT CODE TEMPORAL (Bórralo después de la prueba)
-    wallet.balance = 50.00;
-
     res.status(200).json({
       message: 'Billetera obtenida exitosamente 💰',
       wallet: {
@@ -110,6 +107,7 @@ exports.requestWithdrawal = async (req, res) => {
     
     const feeAmount = withdrawalAmount * feePercent;
     const netAmount = withdrawalAmount - feeAmount;
+    const typeLabel = isExpress ? '⚡ RETIRO EXPRÉS' : '🐢 RETIRO ESTÁNDAR';
 
     // 🛡️ PASO 1: BLOQUEO DE FONDOS (Quitar saldo y poner en pendiente temporalmente)
     const withdrawal = await prisma.$transaction(async (tx) => {
