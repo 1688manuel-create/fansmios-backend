@@ -84,25 +84,29 @@ exports.requestWithdrawal = async (req, res) => {
     const profile = await prisma.creatorProfile.findUnique({ where: { userId: creatorId } });
     if (!profile || profile.kycStatus !== 'APPROVED') return res.status(403).json({ error: '⚠️ Verificación Requerida: Tu identidad (KYC) debe estar aprobada por un administrador.' });
 
+    // 🛡️ Límite: Solo 1 retiro estándar (gratis) por semana. ¡VIP no tiene límites!
     if (!isExpress) {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const threeDaysAgo = new Date(Date.now() - (3 * 24 * 60 * 60 * 1000));
       const recentWithdrawal = await prisma.withdrawal.findFirst({
-        where: { creatorId: creatorId, createdAt: { gte: sevenDaysAgo }, status: { not: 'FAILED' } }
+        where: { creatorId: creatorId, createdAt: { gte: threeDaysAgo }, status: { not: 'FAILED' } }
       });
-      if (recentWithdrawal) return res.status(400).json({ error: 'Ya pediste un retiro esta semana. Si te urge, usa "Retiro Exprés ⚡".' });
+      if (recentWithdrawal) return res.status(400).json({ error: 'Límite estándar alcanzado. Para retirar hoy mismo, usa el "Retiro Exprés ⚡".' });
     }
 
     const wallet = await prisma.wallet.findUnique({ where: { userId: creatorId } });
-    if (!wallet || wallet.balance < withdrawalAmount) return res.status(400).json({ error: 'No tienes saldo disponible suficiente.' });
+    
+    // 🚨 ATENCIÓN AL SALDO: Si es VIP, sacamos del PendingBalance. Si es normal, sacamos del Balance liberado.
+    const availableToWithdraw = isExpress ? (wallet.balance + wallet.pendingBalance) : wallet.balance;
+    
+    if (!wallet || availableToWithdraw < withdrawalAmount) return res.status(400).json({ error: 'No tienes saldo suficiente (Recuerda que el saldo pendiente requiere un Retiro Exprés).' });
     if (!wallet.cryptoAddress || wallet.cryptoAddress.length < 10) return res.status(400).json({ error: 'Configura tu Billetera Cripto antes de solicitar un retiro.' });
 
-    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feeWithdrawalExp: 5, feeWithdrawalStd: 2 };
+    // 💰 EL IMPUESTO FANSMIO: Exprés = 5% | Estándar = 0% (Gratis)
+    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feeWithdrawalExp: 5, feeWithdrawalStd: 0 };
     const feePercent = isExpress ? (settings.feeWithdrawalExp / 100) : (settings.feeWithdrawalStd / 100);
     
     const feeAmount = withdrawalAmount * feePercent;
     const netAmount = withdrawalAmount - feeAmount;
-    const typeLabel = isExpress ? '⚡ RETIRO EXPRÉS' : '🐢 RETIRO ESTÁNDAR';
 
     // 🛡️ PASO 1: BLOQUEO DE FONDOS (Quitar saldo y poner en pendiente temporalmente)
     const withdrawal = await prisma.$transaction(async (tx) => {
