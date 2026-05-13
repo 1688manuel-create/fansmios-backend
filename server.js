@@ -2,7 +2,6 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const rateLimit = require('express-rate-limit'); 
 require('dotenv').config();
 const Sentry = require('@sentry/node'); 
 const http = require('http');
@@ -73,14 +72,6 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// ==========================================
-// 4. ESCUDO ANTI-BOTS (Rate Limiting)
-// ==========================================
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, 
-  max: 10, 
-  message: { error: 'Demasiados intentos desde esta IP, por favor intenta más tarde. 🛡️' }
-});
 
 // ==========================================
 // 5. ENRUTADOR PRINCIPAL (ARQUITECTURA USD)

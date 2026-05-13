@@ -188,6 +188,21 @@ exports.login = async (req, res) => {
       });
     }
 
+    // =================================================================
+    // 🔥 BLINDAJE 3: INTERCEPCIÓN PARA 2FA (NUEVO)
+    // =================================================================
+    if (user.twoFactorEnabled) {
+      // El usuario tiene 2FA. NO le damos los tokens todavía.
+      // Le avisamos al frontend que oculte la contraseña y pida los 6 dígitos.
+      return res.status(200).json({
+        requires2FA: true,
+        userId: user.id,
+        message: 'Se requiere código de verificación 2FA para entrar. 🛡️'
+      });
+    }
+    // =================================================================
+
+    // ✅ SI NO TIENE 2FA: PROSEGUIMOS NORMALMENTE ENTREGANDO LAS LLAVES
     // 🔥 CAMBIO DE '15m' a '7d' (7 DÍAS DE BATERÍA PARA LA SESIÓN)
     const accessToken = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
     const refreshToken = jwt.sign({ userId: user.id, jti: crypto.randomUUID() }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
@@ -201,7 +216,7 @@ exports.login = async (req, res) => {
 
     // 🔥 Reseteamos el reloj de inactividad del usuario
     await prisma.user.update({
-      where: { id: user.id }, // O el nombre de tu variable de usuario
+      where: { id: user.id }, 
       data: { lastLoginAt: new Date() }
     });
 
@@ -365,5 +380,86 @@ exports.resendVerificationEmail = async (req, res) => {
   } catch (error) {
     console.error('Error reenviando verificación:', error);
     res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+// ==========================================
+// 🛡️ VERIFICAR 2FA DURANTE EL LOGIN (PASO 2)
+// ==========================================
+exports.verify2FALogin = async (req, res) => {
+  try {
+    const { userId, token } = req.body;
+
+    if (!userId || !token) {
+      return res.status(400).json({ error: 'Faltan datos de verificación.' });
+    }
+
+    // 1. Buscamos al usuario con sus perfiles incluidos
+    const user = await prisma.user.findUnique({ 
+      where: { id: userId },
+      include: { 
+        creatorProfile: true,
+        wallet: true 
+      }
+    });
+
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
+      return res.status(400).json({ error: 'El 2FA no está activado o el usuario no existe.' });
+    }
+
+    // 2. Validamos el código con Speakeasy
+    const isVerified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: token,
+      window: 1 // Margen de seguridad de 30 segundos
+    });
+
+    if (!isVerified) {
+      return res.status(400).json({ error: 'Código 2FA incorrecto o expirado.' });
+    }
+
+    // 3. ¡ÉXITO! El código es correcto. Ahora sí generamos las llaves oficiales.
+    const accessToken = jwt.sign({ userId: user.id, role: user.role }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const refreshToken = jwt.sign({ userId: user.id, jti: crypto.randomUUID() }, process.env.JWT_REFRESH_SECRET, { expiresIn: '7d' });
+
+    // 4. Creamos la sesión en la base de datos
+    const deviceInfo = req.headers['user-agent'] || 'Dispositivo Desconocido';
+    const ipAddress = req.ip || req.socket.remoteAddress || 'IP Desconocida';
+
+    await prisma.session.create({
+      data: { 
+        userId: user.id, 
+        refreshToken: refreshToken, 
+        deviceInfo: deviceInfo, 
+        ipAddress: ipAddress, 
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) 
+      }
+    });
+
+    // 5. Actualizamos último login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() }
+    });
+
+    // 6. Respuesta final al Frontend
+    res.status(200).json({
+      message: 'Login exitoso con 2FA 🛡️',
+      token: accessToken,
+      refreshToken,
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        role: user.role, 
+        username: user.username,
+        walletBalance: user.wallet?.balance || 0,
+        creatorProfile: user.creatorProfile 
+      }
+    });
+
+  } catch (error) {
+    console.error('Error en verify2FALogin:', error);
+    res.status(500).json({ error: 'Error interno en la bóveda de seguridad.' });
   }
 };
