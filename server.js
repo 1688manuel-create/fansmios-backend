@@ -80,7 +80,7 @@ app.get('/', (req, res) => {
   res.json({ message: 'Motor Unicornio funcionando y blindado en Dólares 🚀' });
 });
 
-app.use('/api/auth', authLimiter, require('./routes/authRoutes'));
+app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/profile', require('./routes/profileRoutes'));
 app.use('/api/content', require('./routes/contentRoutes'));
