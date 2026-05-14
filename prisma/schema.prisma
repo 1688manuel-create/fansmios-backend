@@ -256,6 +256,7 @@ model Post {
   visibility PostVisibility @default(SUBSCRIBERS_ONLY)
   isPPV      Boolean        @default(false)
   price      Float?         @default(0.0)
+  isPublic Boolean @default(false) // 🌍 NUEVO: Si es true, todo el mundo lo ve. Si es false, solo suscriptores.
   userId String
   scheduledAt DateTime?
   createdAt   DateTime  @default(now())

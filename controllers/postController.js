@@ -76,7 +76,8 @@ const scanContentStrict = async (filePath, mimetype) => {
 // ==========================================
 exports.createPost = async (req, res) => {
   try {
-    const { content, isPPV, price } = req.body;
+    // 🌍 NUEVO: Atrapamos la variable isPublic del frontend
+    const { content, isPPV, price, isPublic } = req.body;
     const userId = req.user.userId;
     const files = req.files || (req.file ? [req.file] : []);
     
@@ -102,7 +103,7 @@ exports.createPost = async (req, res) => {
 
         if (!isVideo) {
           // 🛑 1. IMÁGENES: Escaneamos el archivo LOCAL crudo (100% Precisión contra IAs)
-          const scanResult = await scanContentStrict(file.path, file.mimetype); // <-- Limpiado
+          const scanResult = await scanContentStrict(file.path, file.mimetype); 
           if (!scanResult.isSafe) {
             files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
             return res.status(403).json({ error: `Bloqueado: ${scanResult.reason}` });
@@ -116,7 +117,7 @@ exports.createPost = async (req, res) => {
           cloudUrl = uploadResult.secure_url;
 
           // Escaneamos la URL usando el Truco del .JPG en Alta Calidad
-          const scanResult = await scanContentStrict(cloudUrl, file.mimetype); // <-- Limpiado
+          const scanResult = await scanContentStrict(cloudUrl, file.mimetype); 
           if (!scanResult.isSafe) {
             await cloudinary.uploader.destroy(uploadResult.public_id, { resource_type: 'video' });
             files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
@@ -135,13 +136,21 @@ exports.createPost = async (req, res) => {
     // 🔥 FIX BLINDADO: Garantizar Texto (String)
     let finalMediaUrl = null;
     if (mediaUrls.length === 1) {
-      finalMediaUrl = mediaUrls[0]; 
+      finalMediaUrl = mediaUrls; 
     } else if (mediaUrls.length > 1) {
       finalMediaUrl = JSON.stringify(mediaUrls); 
     }
 
     const newPost = await prisma.post.create({
-      data: { content: content || null, mediaUrl: finalMediaUrl, mediaType, isPPV: isPPV === 'true' || isPPV === true, price: price ? parseFloat(price) : 0, userId },
+      data: { 
+        content: content || null, 
+        mediaUrl: finalMediaUrl, 
+        mediaType, 
+        isPPV: isPPV === 'true' || isPPV === true, 
+        price: price ? parseFloat(price) : 0, 
+        isPublic: isPublic === 'true' || isPublic === true, // 🌍 NUEVO: Guardamos si es público
+        userId 
+      },
       include: { user: { select: { username: true } } }
     });
     
@@ -164,17 +173,17 @@ exports.getAllPosts = async (req, res) => {
     const posts = await prisma.post.findMany({
       where: { OR: [{ user: { status: 'ACTIVE' } }, { userId: userId }] },
       orderBy: { createdAt: 'desc' },
-      take: 15, // 🔥 AGREGA ESTO: Solo trae los últimos 15 posts para que cargue a la velocidad de la luz
+      take: 15, 
       include: {
         user: { 
           select: { 
             id: true, 
             username: true, 
-            role: true, // 🔥 ¡AQUÍ ESTABA EL INFILTRADO! Pedimos el rol del usuario
+            role: true, 
             creatorProfile: { 
               select: { 
                 profileImage: true,
-                isVerified: true // 🔥 Y también pedimos la palomita de verificación
+                isVerified: true 
               } 
             }, 
             subscribers: { where: { fanId: userId } },
@@ -185,7 +194,6 @@ exports.getAllPosts = async (req, res) => {
         purchases: { where: { fanId: userId } },
         likes: { select: { emoji: true, userId: true } }, 
         comments: { 
-          // 🚫 FILTRO DE INVISIBILIDAD: No traer comentarios de gente bloqueada por mí
           where: {
             user: {
               blockedBy: {
@@ -198,7 +206,7 @@ exports.getAllPosts = async (req, res) => {
               select: { 
                 username: true, 
                 id: true, 
-                role: true, // 🔥 También lo inyectamos en los comentarios por si acaso
+                role: true, 
                 creatorProfile: { select: { profileImage: true, isVerified: true } } 
               } 
             } 
@@ -212,12 +220,12 @@ exports.getAllPosts = async (req, res) => {
     let organicPosts = [];
 
     posts.forEach(post => {
-      // Control de acceso
-      let hasAccess = isAdmin || post.user.id === userId || post.purchases.length > 0;
+      // 🌍 NUEVO: Control de acceso evalúa si el post es público
+      let hasAccess = isAdmin || post.user.id === userId || post.purchases.length > 0 || post.isPublic;
       if (!hasAccess && !post.isPPV) {
         const sub = post.user.subscribers?.[0];
         if (sub && (sub.status === 'ACTIVE' || sub.status === 'PAST_DUE')) hasAccess = true;
-        else hasAccess = true; // Ajustar según regla de suscripción final
+        else hasAccess = false; // 🔒 BÓVEDA CERRADA
       }
 
       // 🔥 MOTOR DE PESOS (Jerarquía de Pago)
@@ -279,13 +287,14 @@ exports.getCreatorPosts = async (req, res) => {
       }
     });
     
-    let isSubscribed = false; // 🔥 VARIABLE RECUPERADA
+    let isSubscribed = false; 
 
     const formattedPosts = posts.map(post => {
       // 🔥 EVALUAMOS SUSCRIPCIÓN ANTES DE REVISAR ACCESO
       if (post.user?.subscribers?.length > 0) isSubscribed = true;
       
-      const hasAccess = post.userId === userId || post.purchases?.length > 0 || (isSubscribed && !post.isPPV);
+      // 🌍 NUEVO: Añadimos post.isPublic a la regla de acceso del perfil
+      const hasAccess = post.userId === userId || post.purchases?.length > 0 || post.isPublic || (isSubscribed && !post.isPPV);
       const myReactionObj = post.likes.find(l => l.userId === userId);
       const reactionCounts = { '❤️': 0, '❤️‍🔥': 0, '🤤': 0, '🫦': 0 };
       post.likes.forEach(l => { if (reactionCounts[l.emoji] !== undefined) reactionCounts[l.emoji]++; });
@@ -293,7 +302,6 @@ exports.getCreatorPosts = async (req, res) => {
       return { ...post, hasAccess, myReaction: myReactionObj ? myReactionObj.emoji : null, reactionCounts, content: hasAccess ? post.content : null };
     });
 
-    // 🔥 DEVOLVEMOS LA VARIABLE PARA QUE EL BOTÓN NO SE REGRESE
     res.status(200).json({ posts: formattedPosts, isSubscribed });
   } catch (error) { res.status(500).json({ error: 'Error.' }); }
 };
@@ -361,14 +369,12 @@ exports.deletePost = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId;
-    const userRole = req.user.role; // Extraemos el rol del token (FAN, CREATOR, ADMIN)
+    const userRole = req.user.role; 
 
-    // 1. Buscamos el post para verificar existencia y propiedad
     const post = await prisma.post.findUnique({ where: { id } });
 
     if (!post) return res.status(404).json({ error: 'Post no encontrado.' });
 
-    // 🛡️ REGLA DE JERARQUÍA: Solo el dueño del post O un ADMIN pueden borrarlo
     const isOwner = post.userId === userId;
     const isAdmin = userRole === 'ADMIN';
 
@@ -376,12 +382,9 @@ exports.deletePost = async (req, res) => {
       return res.status(403).json({ error: 'No tienes autorización para eliminar este contenido.' });
     }
 
-    // 🌪️ LIMPIEZA DE NUBE (Cloudinary)
-    // Borramos los archivos de la nube para no gastar almacenamiento en contenido eliminado
     if (post.mediaUrl && post.mediaUrl.includes('cloudinary.com')) {
        let urls = [];
        try { 
-         // Manejamos si el post tiene múltiples imágenes (JSON) o una sola (String)
          urls = JSON.parse(post.mediaUrl); 
          if(!Array.isArray(urls)) urls = [post.mediaUrl]; 
        } catch(e) { 
@@ -391,8 +394,7 @@ exports.deletePost = async (req, res) => {
        for (const url of urls) {
          try {
            const parts = url.split('/');
-           // Obtenemos el publicId (nombre del archivo sin extensión)
-           const fileName = parts[parts.length - 1].split('.')[0]; 
+           const fileName = parts[parts.length - 1].split('.'); 
            const publicId = `fansmio_uploads/${fileName}`;
            
            await cloudinary.uploader.destroy(publicId);
@@ -403,7 +405,6 @@ exports.deletePost = async (req, res) => {
        }
     }
 
-    // 2. Aniquilación definitiva en la Base de Datos
     await prisma.post.delete({ where: { id } });
 
     res.status(200).json({ 
@@ -420,28 +421,24 @@ exports.deletePost = async (req, res) => {
 
 exports.deleteComment = async (req, res) => {
   try {
-    const { id } = req.params; // ID del comentario
-    const userId = req.user.userId; // Tu ID (Creador)
+    const { id } = req.params; 
+    const userId = req.user.userId; 
 
-    // 1. Buscamos el comentario incluyendo los datos del POST al que pertenece
     const comment = await prisma.comment.findUnique({ 
       where: { id },
-      include: { post: true } // 🚨 CLAVE: Para saber quién es el dueño del post
+      include: { post: true } 
     });
 
     if (!comment) return res.status(404).json({ error: 'Comentario no encontrado.' });
 
-    // 🛡️ REGLA DE MODERACIÓN FANSMIO:
-    const isAuthor = comment.userId === userId; // ¿El fan quiere borrar su propio comentario?
-    const isPostOwner = comment.post.userId === userId; // ¿TÚ eres el dueño del post (Creador)?
-    const isAdmin = req.user.role === 'ADMIN'; // ¿Es el administrador?
+    const isAuthor = comment.userId === userId; 
+    const isPostOwner = comment.post.userId === userId; 
+    const isAdmin = req.user.role === 'ADMIN'; 
 
-    // Si no eres el autor, ni el dueño del post, ni el admin, no pasas
     if (!isAuthor && !isPostOwner && !isAdmin) {
       return res.status(403).json({ error: 'No tienes permiso para eliminar este comentario.' });
     }
 
-    // 2. Ejecutar la eliminación
     await prisma.comment.delete({ where: { id } });
 
     res.status(200).json({ 
