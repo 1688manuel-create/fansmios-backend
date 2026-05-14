@@ -26,7 +26,7 @@ const storage = multer.diskStorage({
 // 🔥 ANULAMOS EL FILTRO (Dejamos que FFMPEG y la IA hagan la validación real adentro)
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 500 * 1024 * 1024 } // Límite de 500MB para el video
+  limits: { fileSize: 50 * 1024 * 1024 } // Límite de 50MB para el video
 });
 
 // 🚧 Middleware de Aduana: Exigimos exactamente 1 archivo por cada tipo
