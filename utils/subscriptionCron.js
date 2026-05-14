@@ -49,13 +49,23 @@ const startSubscriptionCron = () => {
                   content: `Tu suscripción VIP con @${sub.creator.username} ha expirado. ¡Renueva ahora para no perderte nada!`
                 }
               });
+
+              // 🔥 C. (NUEVO) MENSAJE DIRECTO AL CHAT (Marketing Automático)
+              await db.message.create({
+                data: {
+                  senderId: sub.creatorId, // El creador "envía" el mensaje
+                  receiverId: sub.fanId,   // El fan lo recibe
+                  content: `¡Hola! Tu suscripción VIP ha terminado hoy. Me encantaría seguir viéndote por aquí. Ve a tu panel de suscripciones y dale al botón de reactivar para no perderte mi contenido exclusivo. ⚡`
+                }
+              });
+
             });
             revokedCount++;
           } catch (err) {
             console.error(`🚨 Error al expirar suscripción ${sub.id}:`, err);
           }
         }
-        console.log(`✅ [CRON-SUB] Se revocaron ${revokedCount} accesos VIP.`);
+        console.log(`✅ [CRON-SUB] Se revocaron ${revokedCount} accesos VIP y se enviaron DMs de retención.`);
       } else {
         console.log('🤖 [CRON-SUB] Ninguna suscripción expiró hoy.');
       }

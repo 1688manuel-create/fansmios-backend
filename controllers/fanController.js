@@ -3,23 +3,23 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // ==========================================
-// 1. OBTENER MIS SUSCRIPCIONES ACTIVAS (Como Fan)
+// 1. OBTENER MIS SUSCRIPCIONES (Como Fan)
 // ==========================================
 exports.getMySubscriptions = async (req, res) => {
   try {
     const fanId = req.user.userId;
 
-    // Buscamos todas las suscripciones donde este usuario sea el Fan
+    // Buscamos TODAS las suscripciones (Activas, Vencidas, Canceladas)
     const subscriptions = await prisma.subscription.findMany({
       where: { 
-        fanId: fanId,
-        status: 'ACTIVE' // Solo las que están vigentes
+        fanId: fanId
+        // 🔥 ELIMINAMOS status: 'ACTIVE'
       },
       include: {
         creator: {
           select: { 
             username: true, 
-            creatorProfile: { select: { monthlyPrice: true } }
+            creatorProfile: { select: { monthlyPrice: true, profileImage: true } }
           }
         }
       },
