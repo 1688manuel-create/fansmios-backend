@@ -133,11 +133,9 @@ exports.createPost = async (req, res) => {
     if (!content && mediaUrls.length === 0) return res.status(400).json({ error: 'El post está vacío.' });
     if (content && containsForbiddenWords(content)) return res.status(403).json({ error: 'Contenido prohibido.' });
 
-    // 🔥 FIX BLINDADO: Garantizar Texto (String)
+    // 🔥 FIX BLINDADO DEFINITIVO: Todo se guarda como un String JSON
     let finalMediaUrl = null;
-    if (mediaUrls.length === 1) {
-      finalMediaUrl = mediaUrls; 
-    } else if (mediaUrls.length > 1) {
+    if (mediaUrls.length > 0) {
       finalMediaUrl = JSON.stringify(mediaUrls); 
     }
 
