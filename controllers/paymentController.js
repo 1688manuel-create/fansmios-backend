@@ -8,13 +8,19 @@ const { sendPushNotification } = require('../utils/pushService');
 
 // ==========================================
 // 🏦 MOTOR COVRA: PROCESADOR INTERNO DE FANSMIOS
+// Version: 2.1 - Producción (Corregida)
 // ==========================================
 
 exports.createPaymentIntent = async (req, res) => {
   try {
-    let { amount, type, description, couponCode, creatorId, postId, bundleId, messageId, attachedMessage } = req.body;
+    let { 
+      amount, type, description, couponCode, creatorId, 
+      postId, bundleId, messageId, attachedMessage 
+    } = req.body;
+    
     const fanId = req.user.userId;
 
+    // Normalización de tipos de PPV
     if (type === 'POST') type = 'PPV_POST';
     if (type === 'MESSAGE') type = 'PPV_MESSAGE';
     
@@ -23,7 +29,7 @@ exports.createPaymentIntent = async (req, res) => {
     let finalAmount = parseFloat(amount);
     let appliedCouponId = null;
 
-    // 🔥 Lógica de Cupones de Descuento
+    // 1️⃣ PRE-VALIDACIÓN DE CUPONES (Solo lectura)
     if (couponCode && creatorId && type !== 'TIP') {
       const coupon = await prisma.coupon.findUnique({ where: { code: couponCode.toUpperCase() } });
       if (coupon && coupon.creatorId === creatorId && coupon.active) {
@@ -32,17 +38,17 @@ exports.createPaymentIntent = async (req, res) => {
         if (isNotExpired && hasUsesLeft) {
           finalAmount = finalAmount - ((finalAmount * coupon.discountPercent) / 100);
           appliedCouponId = coupon.id;
-          await prisma.coupon.update({ where: { id: coupon.id }, data: { currentUses: { increment: 1 } } });
         }
       }
     }
 
-    if (finalAmount <= 0) return res.status(400).json({ error: 'El monto de la transacción debe ser mayor a 0.' });
+    if (finalAmount <= 0) return res.status(400).json({ error: 'El monto final debe ser mayor a 0.' });
 
-    // 👑 MODO DIOS: CONSULTAR COMISIONES EN TIEMPO REAL (🔥 CORREGIDO SINGULAR)
-    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20, feeReferral: 5 };
+    // 2️⃣ CÁLCULO DE COMISIONES (MODO DIOS)
+    const settings = await prisma.platformSetting.findUnique({ where: { id: 'global_settings' } }) || 
+                     { feeLive: 30, feeSubscription: 20, feeTips: 20, feePPV: 20, feeReferral: 5 };
     
-    let feePercent = 0.20; // Default por seguridad
+    let feePercent = 0.20; 
     if (type === 'LIVE_TICKET' || type === 'PPV_LIVE') {
       feePercent = settings.feeLive / 100;
     } else if (type === 'SUBSCRIPTION') {
@@ -57,145 +63,115 @@ exports.createPaymentIntent = async (req, res) => {
 
     const platformFee = finalAmount * feePercent; 
     const netAmount = finalAmount - platformFee;
-    
-    // Identificador único para el rastreo interno
     const internalReceiptId = `FSM-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
 
     const fan = await prisma.user.findUnique({ where: { id: fanId }, select: { username: true, email: true } });
 
     // ==========================================
-    // 💳 RUTA 1: RECARGA DE BILLETERA (VÍA PAYRAM / COVRA PAY)
+    // 💳 RUTA 1: RECARGA EXTERNA (PAYRAM / COVRA PAY)
     // ==========================================
     if (type === 'CREDIT_TOPUP') {
-      
-      console.log(`[PAYRAM] Generando enlace de recarga para usuario ${fan.username} - Monto: $${finalAmount}`);
-
-      // 🎯 DISPARO EXACTO LIMPIO (Puro ID de usuario)
       const payramResponse = await axios.post(`${process.env.PAYRAM_BASE_URL}/api/v1/payment`, {
-        customerEmail: fan.email,     // 👈 Exigido por tu API
-        customerID: fanId.toString(), // 🔥 Mandamos solo el ID real, sin inventos de monedas
-        amountInUSD: finalAmount      // 👈 Exigido por tu API
+        customerEmail: fan.email,     
+        customerID: fanId.toString(), 
+        amountInUSD: finalAmount      
       }, {
         headers: {
-          'API-Key': process.env.PAYRAM_API_KEY, // 👈 El header exacto de tu API
+          'API-Key': process.env.PAYRAM_API_KEY, 
           'Content-Type': 'application/json'
         }
       });
 
-      // Tu API devuelve directamente un objeto con la propiedad "url"
       const checkoutUrl = payramResponse.data.url;
+      if (!checkoutUrl) throw new Error("Covra Pay no devolvió una URL válida.");
 
-      if (!checkoutUrl) {
-        throw new Error("Covra Pay no devolvió una URL de checkout válida.");
-      }
-
-      return res.status(200).json({ 
-        success: true, 
-        checkoutUrl: checkoutUrl 
-      });
+      return res.status(200).json({ success: true, checkoutUrl });
 
     } else {
       // ==========================================
-      // 🛍️ RUTA 2: PAGOS INTERNOS A CREADORES (PPV, Tips, Subs)
+      // 🛍️ RUTA 2: PAGOS INTERNOS (Billetera a Billetera)
       // ==========================================
-      
       const targetMessageId = messageId || attachedMessage;
 
-      // TRANSACCIÓN ATÓMICA PARA MOVIMIENTOS INTERNOS
+      // 🔥 TRANSACCIÓN ATÓMICA: Todo sucede o nada sucede
       await prisma.$transaction(async (db) => {
         
-        // 🔴 DESCONTAR EL DINERO DE LA BÓVEDA DEL FAN
+        // A. Validar Saldo
         const fanWallet = await db.wallet.findUnique({ where: { userId: fanId } });
         if (!fanWallet || fanWallet.balance < finalAmount) {
           throw new Error("Saldo insuficiente en tu Bóveda de FansMio.");
         }
         
+        // B. Descontar Saldo del Fan
         await db.wallet.update({
           where: { userId: fanId },
           data: { balance: { decrement: finalAmount } }
         });
 
-        // Registrar la compra
+        // C. Quemar Cupón (Solo si es válido y dentro de la transacción)
+        if (appliedCouponId) {
+          await db.coupon.update({
+            where: { id: appliedCouponId },
+            data: { currentUses: { increment: 1 } }
+          });
+        }
+
+        // D. Registrar la Transacción en el Ledger
         await db.transaction.create({
           data: { 
-            senderId: fanId, 
-            receiverId: creatorId, 
-            type: type, 
-            status: 'COMPLETED', 
-            amount: finalAmount, 
-            platformFee, 
-            netAmount, 
-            postId, 
-            bundleId, 
-            attachedMessage: targetMessageId, 
-            payramReceiptId: internalReceiptId // Guardamos el ID interno
+            senderId: fanId, receiverId: creatorId, type, status: 'COMPLETED', 
+            amount: finalAmount, platformFee, netAmount, postId, bundleId, 
+            attachedMessage: targetMessageId, payramReceiptId: internalReceiptId 
           }
         });
 
-        // 🟡 El dinero va a PENDING BALANCE (cuarentena del creador)
+        // E. Acreditar al Creador (Pending Balance)
         await db.wallet.upsert({
           where: { userId: creatorId },
           update: { pendingBalance: { increment: netAmount } },
-          create: { userId: creatorId, pendingBalance: netAmount }
+          create: { userId: creatorId, balance: 0, pendingBalance: netAmount }
         });
 
-        // ==========================================
-        // 🤝 MOTOR DE REFERIDOS (SOLO SUSCRIPCIONES - CANDADO 5 MESES)
-        // ==========================================
+        // F. MOTOR DE REFERIDOS (Solo para suscripciones nuevas)
         if (type === 'SUBSCRIPTION') {
           const creatorData = await db.user.findUnique({ 
-            where: { id: creatorId }, 
-            select: { referredById: true, username: true, createdAt: true } 
+            where: { id: creatorId }, select: { referredById: true, username: true, createdAt: true } 
           });
           
-          if (creatorData && creatorData.referredById) {
-            // ⏳ REGLA DE ORO: Calcular si han pasado menos de 5 meses
+          if (creatorData?.referredById) {
             const expirationDate = new Date(creatorData.createdAt);
             expirationDate.setMonth(expirationDate.getMonth() + 5);
-            const now = new Date();
 
-            if (now <= expirationDate) {
-              const referralPercent = (settings.feeReferral || 5) / 100;
-              const referralBonus = finalAmount * referralPercent;
+            if (new Date() <= expirationDate) {
+              const referralBonus = finalAmount * ((settings.feeReferral || 5) / 100);
 
-              // Depositamos la comisión al Padrino
               await db.wallet.upsert({
                 where: { userId: creatorData.referredById },
                 update: { balance: { increment: referralBonus } },
                 create: { userId: creatorData.referredById, balance: referralBonus }
               });
 
-              // Recibo de promoción
               await db.transaction.create({
                 data: { 
-                  senderId: creatorId, 
-                  receiverId: creatorData.referredById, 
-                  type: 'PROMOTION', 
-                  status: 'COMPLETED', 
-                  amount: referralBonus, 
-                  platformFee: 0, 
-                  netAmount: referralBonus, 
-                  attachedMessage: `Comisión por referido de @${creatorData.username}`, 
-                  payramReceiptId: `REF-${crypto.randomBytes(6).toString('hex').toUpperCase()}`
+                  senderId: creatorId, receiverId: creatorData.referredById, 
+                  type: 'PROMOTION', status: 'COMPLETED', amount: referralBonus, 
+                  netAmount: referralBonus, attachedMessage: `Comisión referido @${creatorData.username}`, 
+                  payramReceiptId: `REF-${crypto.randomBytes(4).toString('hex').toUpperCase()}`
                 }
               });
 
-              // Notificamos al Padrino
               await db.notification.create({
                 data: {
-                  userId: creatorData.referredById,
-                  type: 'MONEY',
-                  content: `¡Dinero pasivo! 💸 Ganaste $${referralBonus.toFixed(2)} por una suscripción de tu referido @${creatorData.username}.`,
+                  userId: creatorData.referredById, type: 'MONEY',
+                  content: `¡Dinero pasivo! 💸 Ganaste $${referralBonus.toFixed(2)} por referido @${creatorData.username}.`,
                   link: '/dashboard/referrals'
                 }
               });
-            } else {
-              console.log(`⏱️ Referido expirado: @${creatorData.username} superó los 5 meses. No hay comisión.`);
             }
           }
         }
-        // ==========================================
 
+        // G. DESBLOQUEO DE CONTENIDO Y NOTIFICACIONES
         let notificationMessage = '';
         let notificationType = 'MONEY';
 
@@ -207,68 +183,61 @@ exports.createPaymentIntent = async (req, res) => {
             update: { status: 'ACTIVE', endDate },
             create: { fanId, creatorId, status: 'ACTIVE', price: finalAmount, endDate }
           });
-          notificationMessage = `¡Nuevo Suscriptor! @${fan.username} se ha suscrito a tu perfil por $${finalAmount}. 🎉`;
+          notificationMessage = `¡Nuevo Suscriptor! @${fan.username} se suscribió por $${finalAmount}. 🎉`;
           notificationType = 'SUBSCRIPTION';
 
         } else if (type === 'PPV_POST') {
           await db.postPurchase.create({ data: { fanId, postId, pricePaid: finalAmount } });
-          notificationMessage = `@${fan.username} desbloqueó tu publicación PPV por $${finalAmount}. 🔓`;
+          notificationMessage = `@${fan.username} desbloqueó un post PPV ($${finalAmount}). 🔓`;
           notificationType = 'PPV_SALE';
 
         } else if (type === 'PPV_MESSAGE') {
-          if (!targetMessageId) throw new Error("El sistema no recibió el ID del mensaje a desbloquear.");
+          if (!targetMessageId) throw new Error("ID de mensaje faltante.");
           await db.messagePurchase.create({ 
-            data: { 
-              pricePaid: finalAmount,
-              fan: { connect: { id: fanId } },
-              message: { connect: { id: targetMessageId } }
-            } 
+            data: { pricePaid: finalAmount, fan: { connect: { id: fanId } }, message: { connect: { id: targetMessageId } } } 
           });
           await db.message.update({ where: { id: targetMessageId }, data: { isUnlocked: true } });
-          notificationMessage = `@${fan.username} desbloqueó tu mensaje privado por $${finalAmount}. 💌`;
+          notificationMessage = `@${fan.username} desbloqueó un mensaje ($${finalAmount}). 💌`;
           notificationType = 'MESSAGE_SALE';
 
         } else if (type === 'BUNDLE') {
           const bundle = await db.bundle.findUnique({ where: { id: bundleId }, include: { posts: true } });
           await db.bundlePurchase.create({ data: { fanId, bundleId, pricePaid: finalAmount } });
-          const postPurchasesData = bundle.posts.map(p => ({ fanId, postId: p.id, pricePaid: 0 }));
-          await db.postPurchase.createMany({ data: postPurchasesData, skipDuplicates: true });
-          notificationMessage = `@${fan.username} compró tu paquete "${bundle.title}" por $${finalAmount}. 📦`;
+          const postPurchases = bundle.posts.map(p => ({ fanId, postId: p.id, pricePaid: 0 }));
+          await db.postPurchase.createMany({ data: postPurchases, skipDuplicates: true });
+          notificationMessage = `@${fan.username} compró el paquete "${bundle.title}". 📦`;
           notificationType = 'BUNDLE_SALE';
 
         } else if (type === 'TIP') {
-          notificationMessage = `@${fan.username} te ha enviado una propina de $${finalAmount}! 💸 "${description || '¡Gracias!'}"`;
+          notificationMessage = `¡Propina de $${finalAmount} de @${fan.username}! 💸 "${description || '¡Gracias!'}"`;
           notificationType = 'TIP';
-          
-        } else {
-          notificationMessage = `@${fan.username} realizó un pago de $${finalAmount}. 💰`;
-          notificationType = 'MONEY';
         }
 
         // Notificar al Creador
         if (creatorId !== fanId) {
           await db.notification.create({
-            data: {
-              userId: creatorId,
-              type: notificationType,
-              content: notificationMessage,
-              link: '/dashboard/wallet'
-            }
+            data: { userId: creatorId, type: notificationType, content: notificationMessage, link: '/dashboard/wallet' }
           });
         }
       });
 
-      // 🚀 RESPUESTA AL FRONTEND PARA PAGOS INTERNOS
       return res.status(200).json({ 
         success: true, 
-        message: 'Procesado internamente con éxito', 
-        receipt: internalReceiptId
+        message: 'Procesado con éxito', 
+        receipt: internalReceiptId 
       });
     }
 
   } catch (error) {
-    console.error("Error en Transacción Interna o PayRam:", error);
-    res.status(500).json({ error: error.message || 'Error en el motor de pagos interno.' });
+    console.error("❌ ERROR MOTOR COVRA:", error.message);
+    
+    // Si es error de saldo insuficiente, enviamos 400 para que el frontend lo maneje
+    const isClientError = error.message.includes("Saldo insuficiente") || error.message.includes("Monto");
+    
+    return res.status(isClientError ? 400 : 500).json({ 
+      success: false, 
+      error: error.message || 'Error interno en el procesador de pagos.' 
+    });
   }
 };
 
